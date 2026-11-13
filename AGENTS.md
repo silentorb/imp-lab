@@ -2,13 +2,20 @@
 
 ## Repository purpose
 
-**imp-lab** is a general-purpose Imp editor / GUI library. Language-neutral Imp specs live in **[imp-spec](https://github.com/silentorb/imp-spec)**; the Rust Imp core lives in **[imp-rs](https://github.com/silentorb/imp-rs)**.
+**imp-lab** manages **scaling networks of Imp graphs** and provides editor/GUI building blocks for them. Language-neutral Imp specs live in **[imp-spec](https://github.com/silentorb/imp-spec)**; the Rust Imp core lives in **[imp-rs](https://github.com/silentorb/imp-rs)**.
 
 This repo must not depend on Aura (`aura_*`) crates. Product hosts compose lab crates with their own chrome, registries, and domain extensions.
 
-| Rust crate | Role |
-| --- | --- |
-| `crates/imp_graph_editor/` | Iced Imp graph-dag building blocks (canvas, layout, edit helpers, chrome widgets) |
+### Crate layers
+
+- **Backend** — no Iced; session/network/document management and non-UI helpers.
+- **Frontend** — Iced UI; may depend on backend crates directly.
+- **Shared interfaces** — optional; not a required third layer.
+
+| Rust crate | Layer | Role |
+| --- | --- | --- |
+| `crates/imp_documents/` | Backend | Multi-document session store with host-defined payloads |
+| `crates/imp_graph_editor/` | Frontend | Iced Imp graph-dag building blocks (canvas, layout, edit helpers, chrome widgets) |
 
 ## Commands
 

@@ -1,0 +1,10 @@
+[package]
+name = "imp_documents"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Multi-document session store for Imp graph networks (host-defined payloads)"
+
+[dependencies]
+
+[dev-dependencies]

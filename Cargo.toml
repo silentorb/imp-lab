@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/imp_documents",
     "crates/imp_graph_editor",
 ]
 
