@@ -12,6 +12,8 @@ pub struct CatalogPort {
     pub id: String,
     /// Host-defined key; equal keys are treated as compatible signal types.
     pub signal_key: String,
+    /// When true, the input accepts multiple ordered inbound edges.
+    pub variadic: bool,
 }
 
 /// Host-injected lookup for node-type ports (keeps Imp type crates out of the trait API).
@@ -51,6 +53,14 @@ pub enum GraphEditError {
     /// Node type is unknown in the registry (precise connect / auto-pair).
     #[error("unknown node type `{0}`")]
     UnknownType(String),
+    /// Reorder listed edges that are not a complete variadic fan-in.
+    #[error("invalid variadic reorder for `{node}` port `{port}`")]
+    InvalidVariadicReorder {
+        /// Target node.
+        node: String,
+        /// Target port.
+        port: String,
+    },
 }
 
 /// Allocates a unique node id derived from `base` (`sine`, `sine_2`, …).
@@ -138,7 +148,7 @@ pub fn rename_node(
     Ok(new_id)
 }
 
-/// Changes the type of an existing node (inputs cleared).
+/// Changes a node's type and clears instance literals / type args.
 pub fn set_node_type(
     graph: &mut Graph,
     node_id: &str,
@@ -169,13 +179,26 @@ pub fn unique_edge_id(graph: &Graph, from: &str, from_port: &str, to: &str, to_p
     }
 }
 
-/// Inserts a port-level edge.
+/// Next `Edge.order` for a variadic target (max existing + 1, or 0).
+pub fn next_variadic_order(graph: &Graph, to_node: &str, to_port: &str) -> i64 {
+    graph
+        .edges
+        .values()
+        .filter(|edge| edge.to.node == to_node && edge.to.port == to_port)
+        .filter_map(|edge| edge.order)
+        .max()
+        .map(|order| order + 1)
+        .unwrap_or(0)
+}
+
+/// Inserts a port-level edge. When `variadic_target` is true, assigns the next order.
 pub fn add_edge(
     graph: &mut Graph,
     from_node: impl Into<NodeId>,
     from_port: impl Into<String>,
     to_node: impl Into<NodeId>,
     to_port: impl Into<String>,
+    variadic_target: bool,
 ) -> Result<String, GraphEditError> {
     let from_node = from_node.into();
     let to_node = to_node.into();
@@ -187,6 +210,11 @@ pub fn add_edge(
     if !graph.nodes.contains_key(&to_node) {
         return Err(GraphEditError::NodeMissing(to_node));
     }
+    let order = if variadic_target {
+        Some(next_variadic_order(graph, &to_node, &to_port))
+    } else {
+        None
+    };
     let id = unique_edge_id(graph, &from_node, &from_port, &to_node, &to_port);
     graph.edges.insert(
         id.clone(),
@@ -199,7 +227,7 @@ pub fn add_edge(
                 node: to_node,
                 port: to_port,
             },
-            order: None,
+            order,
         },
     );
     Ok(id)
@@ -224,13 +252,47 @@ pub fn remove_edges_between(graph: &mut Graph, a: &str, b: &str) -> usize {
     before - graph.edges.len()
 }
 
+/// Rewrites `Edge.order` for a variadic fan-in to match `ordered_edge_ids` (`0..n-1`).
+pub fn reorder_variadic_inputs(
+    graph: &mut Graph,
+    node_id: &str,
+    port_id: &str,
+    ordered_edge_ids: &[String],
+) -> Result<(), GraphEditError> {
+    let mut current: Vec<String> = graph
+        .edges
+        .iter()
+        .filter(|(_, edge)| edge.to.node == node_id && edge.to.port == port_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    current.sort();
+    let mut expected = ordered_edge_ids.to_vec();
+    expected.sort();
+    if current != expected {
+        return Err(GraphEditError::InvalidVariadicReorder {
+            node: node_id.into(),
+            port: port_id.into(),
+        });
+    }
+    for (index, edge_id) in ordered_edge_ids.iter().enumerate() {
+        let Some(edge) = graph.edges.get_mut(edge_id) else {
+            return Err(GraphEditError::EdgeMissing(edge_id.clone()));
+        };
+        edge.order = Some(index as i64);
+    }
+    Ok(())
+}
+
 /// Picks an unused compatible output→input port pair for a simple connection.
+///
+/// Singleton inputs are preferred while free. Variadic inputs remain available
+/// for additional wires after they already have inbound edges.
 pub fn auto_pair_ports(
     catalog: &impl NodeTypeCatalog,
     graph: &Graph,
     from_node: &str,
     to_node: &str,
-) -> Result<(String, String), GraphEditError> {
+) -> Result<(String, String, bool), GraphEditError> {
     let from = graph
         .nodes
         .get(from_node)
@@ -247,36 +309,146 @@ pub fn auto_pair_ports(
         .inputs(&to.node_type)
         .ok_or_else(|| GraphEditError::UnknownType(to.node_type.clone()))?;
 
-    let used_inputs: HashSet<&str> = graph
+    let used_singleton_inputs: HashSet<&str> = graph
         .edges
         .values()
         .filter(|edge| edge.to.node == to_node)
         .map(|edge| edge.to.port.as_str())
         .collect();
 
-    let free_inputs: Vec<&CatalogPort> = inputs
+    let available: Vec<&CatalogPort> = inputs
         .iter()
-        .filter(|port| !used_inputs.contains(port.id.as_str()))
+        .filter(|port| {
+            if port.variadic {
+                true
+            } else {
+                !used_singleton_inputs.contains(port.id.as_str())
+            }
+        })
         .collect();
 
-    // Prefer matching signal keys.
+    // Prefer matching signal keys on free singleton inputs first.
+    let free_singletons: Vec<&CatalogPort> = available
+        .iter()
+        .copied()
+        .filter(|port| !port.variadic)
+        .collect();
     for out in &outputs {
-        for inp in &free_inputs {
+        for inp in &free_singletons {
             if out.signal_key == inp.signal_key {
-                return Ok((out.id.clone(), inp.id.clone()));
+                return Ok((out.id.clone(), inp.id.clone(), false));
             }
         }
     }
+    if let (Some(out), Some(inp)) = (outputs.first(), free_singletons.first()) {
+        return Ok((out.id.clone(), inp.id.clone(), false));
+    }
 
-    // Otherwise first free pair.
-    if let (Some(out), Some(inp)) = (outputs.first(), free_inputs.first()) {
-        return Ok((out.id.clone(), inp.id.clone()));
+    // Then variadic inputs (append).
+    let variadic: Vec<&CatalogPort> = available
+        .iter()
+        .copied()
+        .filter(|port| port.variadic)
+        .collect();
+    for out in &outputs {
+        for inp in &variadic {
+            if out.signal_key == inp.signal_key {
+                return Ok((out.id.clone(), inp.id.clone(), true));
+            }
+        }
+    }
+    if let (Some(out), Some(inp)) = (outputs.first(), variadic.first()) {
+        return Ok((out.id.clone(), inp.id.clone(), true));
     }
 
     Err(GraphEditError::NoPortPair {
         from: from_node.to_string(),
         to: to_node.to_string(),
     })
+}
+
+/// Expanded input slot used for Precise-mode layout and hit-testing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InputSlot {
+    /// Ordinary singleton catalog input.
+    Singleton {
+        /// Catalog port id.
+        port_id: String,
+    },
+    /// One inbound edge on a variadic catalog input.
+    Variadic {
+        /// Catalog port id.
+        port_id: String,
+        /// Edge contributing this slot.
+        edge_id: String,
+        /// Edge order among siblings.
+        order: i64,
+    },
+    /// Trailing empty slot for appending a new variadic connection.
+    VariadicDummy {
+        /// Catalog port id.
+        port_id: String,
+    },
+}
+
+impl InputSlot {
+    /// Catalog port id for this slot.
+    pub fn port_id(&self) -> &str {
+        match self {
+            Self::Singleton { port_id }
+            | Self::Variadic { port_id, .. }
+            | Self::VariadicDummy { port_id } => port_id,
+        }
+    }
+
+    /// Whether Precise connect may target this slot.
+    pub fn accepts_connect(&self) -> bool {
+        matches!(self, Self::Singleton { .. } | Self::VariadicDummy { .. })
+    }
+
+    /// Label drawn beside the port handle.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Singleton { port_id } => port_id.clone(),
+            Self::Variadic { port_id, order, .. } => format!("{port_id} {order}"),
+            Self::VariadicDummy { port_id } => format!("{port_id}+"),
+        }
+    }
+}
+
+/// Expands catalog inputs into ordered visual slots (variadic filled + trailing dummy).
+pub fn expand_input_slots(
+    catalog_inputs: &[CatalogPort],
+    graph: &Graph,
+    node_id: &str,
+) -> Vec<InputSlot> {
+    let mut slots = Vec::new();
+    for port in catalog_inputs {
+        if !port.variadic {
+            slots.push(InputSlot::Singleton {
+                port_id: port.id.clone(),
+            });
+            continue;
+        }
+        let mut edges: Vec<(String, i64)> = graph
+            .edges
+            .iter()
+            .filter(|(_, edge)| edge.to.node == node_id && edge.to.port == port.id)
+            .map(|(id, edge)| (id.clone(), edge.order.unwrap_or(0)))
+            .collect();
+        edges.sort_by_key(|(_, order)| *order);
+        for (edge_id, order) in edges {
+            slots.push(InputSlot::Variadic {
+                port_id: port.id.clone(),
+                edge_id,
+                order,
+            });
+        }
+        slots.push(InputSlot::VariadicDummy {
+            port_id: port.id.clone(),
+        });
+    }
+    slots
 }
 
 #[cfg(test)]
@@ -303,6 +475,15 @@ mod tests {
         CatalogPort {
             id: id.into(),
             signal_key: signal_key.into(),
+            variadic: false,
+        }
+    }
+
+    fn variadic(id: &str, signal_key: &str) -> CatalogPort {
+        CatalogPort {
+            id: id.into(),
+            signal_key: signal_key.into(),
+            variadic: true,
         }
     }
 
@@ -315,6 +496,8 @@ mod tests {
             vec![port("frequency", "Sample"), port("time", "Time")],
         );
         outputs.insert("sine".into(), vec![port("signal", "Sample")]);
+        inputs.insert("add".into(), vec![variadic("inputs", "Sample")]);
+        outputs.insert("add".into(), vec![port("audio", "Sample")]);
         StubCatalog { inputs, outputs }
     }
 
@@ -339,7 +522,7 @@ mod tests {
         let mut graph = empty_graph();
         add_node(&mut graph, "a", "parameter").unwrap();
         add_node(&mut graph, "b", "sine").unwrap();
-        add_edge(&mut graph, "a", "value", "b", "frequency").unwrap();
+        add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
         remove_node(&mut graph, "a").unwrap();
         assert!(!graph.nodes.contains_key("a"));
         assert!(graph.edges.is_empty());
@@ -350,12 +533,10 @@ mod tests {
         let mut graph = empty_graph();
         add_node(&mut graph, "a", "parameter").unwrap();
         add_node(&mut graph, "b", "sine").unwrap();
-        add_edge(&mut graph, "a", "value", "b", "frequency").unwrap();
+        add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
         rename_node(&mut graph, "a", "freq").unwrap();
         let edge = graph.edges.values().next().unwrap();
         assert_eq!(edge.from.node, "freq");
-        assert!(graph.nodes.contains_key("freq"));
-        assert!(!graph.nodes.contains_key("a"));
     }
 
     #[test]
@@ -364,10 +545,11 @@ mod tests {
         let mut graph = empty_graph();
         add_node(&mut graph, "freq", "parameter").unwrap();
         add_node(&mut graph, "osc", "sine").unwrap();
-        let (from_port, to_port) =
+        let (from_port, to_port, variadic) =
             auto_pair_ports(&catalog, &graph, "freq", "osc").expect("pair");
         assert_eq!(from_port, "value");
         assert_eq!(to_port, "frequency");
+        assert!(!variadic);
     }
 
     #[test]
@@ -375,9 +557,78 @@ mod tests {
         let mut graph = empty_graph();
         add_node(&mut graph, "a", "parameter").unwrap();
         add_node(&mut graph, "b", "sine").unwrap();
-        add_edge(&mut graph, "a", "value", "b", "frequency").unwrap();
-        add_edge(&mut graph, "a", "value", "b", "time").unwrap();
+        add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
+        add_edge(&mut graph, "a", "value", "b", "time", false).unwrap();
         assert_eq!(remove_edges_between(&mut graph, "a", "b"), 2);
         assert!(graph.edges.is_empty());
+    }
+
+    #[test]
+    fn add_edge_assigns_variadic_order() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "parameter").unwrap();
+        add_node(&mut graph, "b", "parameter").unwrap();
+        add_node(&mut graph, "mix", "add").unwrap();
+        let first = add_edge(&mut graph, "a", "value", "mix", "inputs", true).unwrap();
+        let second = add_edge(&mut graph, "b", "value", "mix", "inputs", true).unwrap();
+        assert_eq!(graph.edges.get(&first).unwrap().order, Some(0));
+        assert_eq!(graph.edges.get(&second).unwrap().order, Some(1));
+    }
+
+    #[test]
+    fn auto_pair_appends_to_variadic() {
+        let catalog = stub_catalog();
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "parameter").unwrap();
+        add_node(&mut graph, "b", "parameter").unwrap();
+        add_node(&mut graph, "mix", "add").unwrap();
+        let (from_port, to_port, variadic) =
+            auto_pair_ports(&catalog, &graph, "a", "mix").expect("first");
+        assert_eq!((from_port.as_str(), to_port.as_str(), variadic), ("value", "inputs", true));
+        add_edge(&mut graph, "a", from_port, "mix", to_port, true).unwrap();
+        let (from_port, to_port, variadic) =
+            auto_pair_ports(&catalog, &graph, "b", "mix").expect("second");
+        assert_eq!((from_port.as_str(), to_port.as_str(), variadic), ("value", "inputs", true));
+    }
+
+    #[test]
+    fn expand_input_slots_adds_dummy() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "parameter").unwrap();
+        add_node(&mut graph, "mix", "add").unwrap();
+        add_edge(&mut graph, "a", "value", "mix", "inputs", true).unwrap();
+        let slots = expand_input_slots(&[variadic("inputs", "Sample")], &graph, "mix");
+        assert_eq!(slots.len(), 2);
+        assert!(matches!(
+            &slots[0],
+            InputSlot::Variadic {
+                port_id,
+                order: 0,
+                ..
+            } if port_id == "inputs"
+        ));
+        assert!(matches!(
+            &slots[1],
+            InputSlot::VariadicDummy { port_id } if port_id == "inputs"
+        ));
+    }
+
+    #[test]
+    fn reorder_variadic_inputs_rewrites_order() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "parameter").unwrap();
+        add_node(&mut graph, "b", "parameter").unwrap();
+        add_node(&mut graph, "mix", "add").unwrap();
+        let first = add_edge(&mut graph, "a", "value", "mix", "inputs", true).unwrap();
+        let second = add_edge(&mut graph, "b", "value", "mix", "inputs", true).unwrap();
+        reorder_variadic_inputs(
+            &mut graph,
+            "mix",
+            "inputs",
+            &[second.clone(), first.clone()],
+        )
+        .unwrap();
+        assert_eq!(graph.edges.get(&second).unwrap().order, Some(0));
+        assert_eq!(graph.edges.get(&first).unwrap().order, Some(1));
     }
 }

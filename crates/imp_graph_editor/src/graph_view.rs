@@ -8,6 +8,7 @@ use iced::widget::canvas::{self, path::Builder, Frame, Geometry, Path, Stroke, T
 use iced::widget::Canvas;
 use iced::{Color, Element, Fill, Font, Pixels, Point, Rectangle, Renderer, Size, Theme, Vector};
 
+use crate::graph_edit::{expand_input_slots, CatalogPort, InputSlot};
 use crate::graph_layout::{
     layout_graph, node_size_for, GraphLayout, NODE_HEADER_HEIGHT, PORT_SPACING,
 };
@@ -24,11 +25,11 @@ const EDGE_HIT_DISTANCE: f32 = 8.0;
 const PORT_LABEL_GAP: f32 = 6.0;
 const PORT_LABEL_SIZE: f32 = 11.0;
 
-/// Input/output port ids for a node type instance.
+/// Input/output port templates for a node type instance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NodePortInfo {
-    /// Input port ids (top→bottom).
-    pub inputs: Vec<String>,
+    /// Catalog input templates (variadic inputs expand at draw/hit time).
+    pub inputs: Vec<CatalogPort>,
     /// Output port ids (top→bottom).
     pub outputs: Vec<String>,
 }
@@ -68,6 +69,8 @@ pub enum GraphEdit {
         to_node: String,
         /// Target input port.
         to_port: String,
+        /// When true, append to a variadic input with the next `Edge.order`.
+        variadic_target: bool,
     },
     /// Begin a connect gesture.
     BeginConnect {
@@ -94,6 +97,15 @@ pub enum GraphEdit {
         a: String,
         /// Other endpoint.
         b: String,
+    },
+    /// Reorder variadic inbound edges to `ordered_edge_ids` (`0..n-1`).
+    ReorderVariadicInputs {
+        /// Node owning the variadic input.
+        node_id: String,
+        /// Variadic catalog port id.
+        port: String,
+        /// Edge ids in the desired top→bottom order.
+        ordered_edge_ids: Vec<String>,
     },
 }
 
@@ -161,7 +173,9 @@ pub struct GraphView {
     connect_from_node: Option<String>,
     connect_from_port: Option<String>,
     ports: PortCatalog,
-    /// Full edges for precise drawing / hit-testing: (edge_id, from_node, from_port, to_node, to_port).
+    /// Expanded Precise input slots per node (includes variadic dummies).
+    input_slots: BTreeMap<NodeId, Vec<InputSlot>>,
+    /// Full edges for precise drawing / hit-testing.
     edges: Vec<(EdgeId, NodeId, String, NodeId, String)>,
 }
 
@@ -186,15 +200,24 @@ impl GraphView {
                 )
             })
             .collect();
+        let input_slots: BTreeMap<NodeId, Vec<InputSlot>> = graph
+            .nodes
+            .keys()
+            .map(|id| {
+                let slots = ports
+                    .get(id)
+                    .map(|info| expand_input_slots(&info.inputs, graph, id))
+                    .unwrap_or_default();
+                (id.clone(), slots)
+            })
+            .collect();
         let precise = ui.connection_mode == ConnectionMode::Precise;
         let node_sizes = graph
             .nodes
             .keys()
             .map(|id| {
-                let (inputs, outputs) = ports
-                    .get(id)
-                    .map(|info| (info.inputs.len(), info.outputs.len()))
-                    .unwrap_or((0, 0));
+                let inputs = input_slots.get(id).map(|slots| slots.len()).unwrap_or(0);
+                let outputs = ports.get(id).map(|info| info.outputs.len()).unwrap_or(0);
                 (id.clone(), node_size_for(inputs, outputs, precise))
             })
             .collect();
@@ -211,8 +234,16 @@ impl GraphView {
                 .as_ref()
                 .and_then(|d| d.from_port.clone()),
             ports,
+            input_slots,
             edges,
         }
+    }
+
+    fn slots_for(&self, node_id: &str) -> &[InputSlot] {
+        self.input_slots
+            .get(node_id)
+            .map(|slots| slots.as_slice())
+            .unwrap_or(&[])
     }
 
     fn camera_for(&self, state: &ViewState, bounds: Size) -> (Vector, f32) {
@@ -232,6 +263,7 @@ impl GraphView {
         state.translation = center_translation(&self.layout, bounds, 1.0);
         state.drag_last = None;
         state.panning = false;
+        state.reorder_drag = None;
     }
 
     fn screen_to_world(&self, state: &ViewState, bounds: Size, screen: Point) -> Point {
@@ -249,11 +281,12 @@ impl GraphView {
             .find(|node| node.id == node_id)
             .map(|node| node.size)
             .unwrap_or_else(|| {
-                let (inputs, outputs) = self
+                let inputs = self.slots_for(node_id).len();
+                let outputs = self
                     .ports
                     .get(node_id)
-                    .map(|info| (info.inputs.len(), info.outputs.len()))
-                    .unwrap_or((0, 0));
+                    .map(|info| info.outputs.len())
+                    .unwrap_or(0);
                 node_size_for(
                     inputs,
                     outputs,
@@ -273,7 +306,24 @@ impl GraphView {
         None
     }
 
-    fn hit_port(&self, world: Point) -> Option<(NodeId, String, bool)> {
+    fn hit_input_slot(&self, world: Point) -> Option<(NodeId, usize, InputSlot)> {
+        if self.connection_mode != ConnectionMode::Precise {
+            return None;
+        }
+        for node in &self.layout.nodes {
+            let slots = self.slots_for(&node.id);
+            let size = node.size;
+            for (index, slot) in slots.iter().enumerate() {
+                let pos = port_position(node.position, size, index, false);
+                if (pos.x - world.x).hypot(pos.y - world.y) <= PORT_HIT_RADIUS {
+                    return Some((node.id.clone(), index, slot.clone()));
+                }
+            }
+        }
+        None
+    }
+
+    fn hit_output_port(&self, world: Point) -> Option<(NodeId, String)> {
         if self.connection_mode != ConnectionMode::Precise {
             return None;
         }
@@ -282,23 +332,24 @@ impl GraphView {
                 continue;
             };
             let size = node.size;
-            for (index, port) in info.inputs.iter().enumerate() {
-                let pos = port_position(node.position, size, index, false);
-                if (pos.x - world.x).hypot(pos.y - world.y) <= PORT_HIT_RADIUS {
-                    return Some((node.id.clone(), port.clone(), false));
-                }
-            }
             for (index, port) in info.outputs.iter().enumerate() {
                 let pos = port_position(node.position, size, index, true);
                 if (pos.x - world.x).hypot(pos.y - world.y) <= PORT_HIT_RADIUS {
-                    return Some((node.id.clone(), port.clone(), true));
+                    return Some((node.id.clone(), port.clone()));
                 }
             }
         }
         None
     }
 
-    fn edge_endpoints(&self, from: &str, from_port: &str, to: &str, to_port: &str) -> Option<(Point, Point)> {
+    fn edge_endpoints(
+        &self,
+        edge_id: Option<&str>,
+        from: &str,
+        from_port: &str,
+        to: &str,
+        to_port: &str,
+    ) -> Option<(Point, Point)> {
         let from_node = self.layout.nodes.iter().find(|n| n.id == from)?;
         let to_node = self.layout.nodes.iter().find(|n| n.id == to)?;
         let from_size = self.size_of(from);
@@ -316,8 +367,27 @@ impl GraphView {
         };
 
         let end = if self.connection_mode == ConnectionMode::Precise {
-            let info = self.ports.get(to)?;
-            let index = info.inputs.iter().position(|p| p == to_port).unwrap_or(0);
+            let slots = self.slots_for(to);
+            let index = slots
+                .iter()
+                .position(|slot| match slot {
+                    InputSlot::Variadic {
+                        port_id,
+                        edge_id: slot_edge,
+                        ..
+                    } => {
+                        port_id == to_port
+                            && edge_id.is_some_and(|id| id == slot_edge.as_str())
+                    }
+                    InputSlot::Singleton { port_id } => port_id == to_port,
+                    InputSlot::VariadicDummy { .. } => false,
+                })
+                .or_else(|| {
+                    slots
+                        .iter()
+                        .position(|slot| slot.port_id() == to_port)
+                })
+                .unwrap_or(0);
             port_position(to_node.position, to_size, index, false)
         } else {
             Point::new(
@@ -333,7 +403,7 @@ impl GraphView {
         let mut best: Option<(f32, EdgeId, NodeId, NodeId)> = None;
         if self.connection_mode == ConnectionMode::Simple {
             for (from, to) in &self.layout.edges {
-                let Some((start, end)) = self.edge_endpoints(from, "", to, "") else {
+                let Some((start, end)) = self.edge_endpoints(None, from, "", to, "") else {
                     continue;
                 };
                 let dist = point_segment_distance(world, start, end);
@@ -353,7 +423,7 @@ impl GraphView {
         } else {
             for (edge_id, from, from_port, to, to_port) in &self.edges {
                 let Some((start, end)) =
-                    self.edge_endpoints(from, from_port, to, to_port)
+                    self.edge_endpoints(Some(edge_id), from, from_port, to, to_port)
                 else {
                     continue;
                 };
@@ -393,22 +463,27 @@ impl GraphView {
             }
             GraphTool::Connect => {
                 if self.connection_mode == ConnectionMode::Precise {
-                    if let Some((node, port, is_output)) = self.hit_port(world) {
-                        if is_output {
-                            return Some(GraphEdit::BeginConnect {
-                                from_node: node,
-                                from_port: Some(port),
-                            });
-                        }
-                        if let (Some(from_node), Some(from_port)) =
-                            (&self.connect_from_node, &self.connect_from_port)
-                        {
-                            return Some(GraphEdit::ConnectPorts {
-                                from_node: from_node.clone(),
-                                from_port: from_port.clone(),
-                                to_node: node,
-                                to_port: port,
-                            });
+                    if let Some((node, port)) = self.hit_output_port(world) {
+                        return Some(GraphEdit::BeginConnect {
+                            from_node: node,
+                            from_port: Some(port),
+                        });
+                    }
+                    if let Some((node, _, slot)) = self.hit_input_slot(world) {
+                        if slot.accepts_connect() {
+                            if let (Some(from_node), Some(from_port)) =
+                                (&self.connect_from_node, &self.connect_from_port)
+                            {
+                                let variadic_target =
+                                    matches!(slot, InputSlot::VariadicDummy { .. });
+                                return Some(GraphEdit::ConnectPorts {
+                                    from_node: from_node.clone(),
+                                    from_port: from_port.clone(),
+                                    to_node: node,
+                                    to_port: slot.port_id().to_string(),
+                                    variadic_target,
+                                });
+                            }
                         }
                     }
                     return Some(GraphEdit::CancelConnect);
@@ -453,6 +528,63 @@ impl GraphView {
             }
         }
     }
+
+    fn reorder_edit_for_drop(
+        &self,
+        node_id: &str,
+        port_id: &str,
+        dragged_edge_id: &str,
+        world_y: f32,
+    ) -> Option<GraphEdit> {
+        let node = self.layout.nodes.iter().find(|n| n.id == node_id)?;
+        let slots = self.slots_for(node_id);
+        let mut sibling_edge_ids: Vec<String> = slots
+            .iter()
+            .filter_map(|slot| match slot {
+                InputSlot::Variadic {
+                    port_id: slot_port,
+                    edge_id,
+                    ..
+                } if slot_port == port_id => Some(edge_id.clone()),
+                _ => None,
+            })
+            .collect();
+        if sibling_edge_ids.len() < 2 {
+            return None;
+        }
+        let from_index = sibling_edge_ids
+            .iter()
+            .position(|id| id == dragged_edge_id)?;
+        let filled_slot_indices: Vec<usize> = slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| match slot {
+                InputSlot::Variadic {
+                    port_id: slot_port, ..
+                } if slot_port == port_id => Some(index),
+                _ => None,
+            })
+            .collect();
+        let target_index = filled_slot_indices
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, slot_index)| {
+                let pos = port_position(node.position, node.size, **slot_index, false);
+                ((pos.y - world_y).abs() * 1000.0) as i32
+            })
+            .map(|(sibling_index, _)| sibling_index)
+            .unwrap_or(from_index);
+        if target_index == from_index {
+            return None;
+        }
+        let edge_id = sibling_edge_ids.remove(from_index);
+        sibling_edge_ids.insert(target_index, edge_id);
+        Some(GraphEdit::ReorderVariadicInputs {
+            node_id: node_id.to_string(),
+            port: port_id.to_string(),
+            ordered_edge_ids: sibling_edge_ids,
+        })
+    }
 }
 
 fn point_segment_distance(p: Point, a: Point, b: Point) -> f32 {
@@ -468,6 +600,13 @@ fn point_segment_distance(p: Point, a: Point, b: Point) -> f32 {
     (p.x - proj.x).hypot(p.y - proj.y)
 }
 
+#[derive(Debug, Clone)]
+struct VariadicReorderDrag {
+    node_id: String,
+    port_id: String,
+    edge_id: String,
+}
+
 /// Pan/zoom camera stored in the canvas widget tree.
 #[derive(Debug, Clone)]
 pub struct ViewState {
@@ -475,6 +614,7 @@ pub struct ViewState {
     scale: f32,
     drag_last: Option<Point>,
     panning: bool,
+    reorder_drag: Option<VariadicReorderDrag>,
     document_key: Option<u64>,
 }
 
@@ -485,6 +625,7 @@ impl Default for ViewState {
             scale: 1.0,
             drag_last: None,
             panning: false,
+            reorder_drag: None,
             document_key: None,
         }
     }
@@ -534,9 +675,32 @@ where
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let position = cursor_in_bounds?;
                 let world = self.screen_to_world(state, bounds.size(), position);
+
+                if self.tool == GraphTool::Select
+                    && self.connection_mode == ConnectionMode::Precise
+                {
+                    if let Some((
+                        node_id,
+                        _,
+                        InputSlot::Variadic {
+                            port_id, edge_id, ..
+                        },
+                    )) = self.hit_input_slot(world)
+                    {
+                        state.reorder_drag = Some(VariadicReorderDrag {
+                            node_id,
+                            port_id,
+                            edge_id,
+                        });
+                        state.drag_last = Some(position);
+                        return Some(canvas::Action::capture());
+                    }
+                }
+
                 let hit = self.hit_node(world).is_some()
                     || self.hit_edge(world).is_some()
-                    || self.hit_port(world).is_some()
+                    || self.hit_input_slot(world).is_some()
+                    || self.hit_output_port(world).is_some()
                     || self.tool == GraphTool::Add;
 
                 if !hit {
@@ -550,8 +714,28 @@ where
                 }
                 return Some(canvas::Action::capture());
             }
-            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
-            | canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)) => {
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Some(drag) = state.reorder_drag.take() {
+                    let position = cursor_in_bounds.or(state.drag_last)?;
+                    let world = self.screen_to_world(state, bounds.size(), position);
+                    state.drag_last = None;
+                    if let Some(edit) = self.reorder_edit_for_drop(
+                        &drag.node_id,
+                        &drag.port_id,
+                        &drag.edge_id,
+                        world.y,
+                    ) {
+                        return Some(canvas::Action::publish(Message::from(edit)).and_capture());
+                    }
+                    return Some(canvas::Action::capture());
+                }
+                if state.drag_last.is_some() || state.panning {
+                    state.drag_last = None;
+                    state.panning = false;
+                    return Some(canvas::Action::capture());
+                }
+            }
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Middle)) => {
                 if state.drag_last.is_some() || state.panning {
                     state.drag_last = None;
                     state.panning = false;
@@ -559,6 +743,12 @@ where
                 }
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if state.reorder_drag.is_some() {
+                    if let Some(position) = cursor_in_bounds {
+                        state.drag_last = Some(position);
+                        return Some(canvas::Action::request_redraw().and_capture());
+                    }
+                }
                 if let (true, Some(last), Some(position)) =
                     (state.panning, state.drag_last, cursor_in_bounds)
                 {
@@ -618,7 +808,9 @@ where
 
         if self.connection_mode == ConnectionMode::Precise {
             for (edge_id, from, from_port, to, to_port) in &self.edges {
-                let Some((start, end)) = self.edge_endpoints(from, from_port, to, to_port) else {
+                let Some((start, end)) =
+                    self.edge_endpoints(Some(edge_id), from, from_port, to, to_port)
+                else {
                     continue;
                 };
                 let mut path = Builder::new();
@@ -636,7 +828,7 @@ where
             }
         } else {
             for (from_id, to_id) in &self.layout.edges {
-                let Some((start, end)) = self.edge_endpoints(from_id, "", to_id, "") else {
+                let Some((start, end)) = self.edge_endpoints(None, from_id, "", to_id, "") else {
                     continue;
                 };
                 let mut path = Builder::new();
@@ -687,21 +879,30 @@ where
             });
 
             if self.connection_mode == ConnectionMode::Precise {
+                let slots = self.slots_for(&node.id);
+                for (index, slot) in slots.iter().enumerate() {
+                    let pos = port_position(node.position, size, index, false);
+                    let fill = if matches!(slot, InputSlot::VariadicDummy { .. }) {
+                        Color {
+                            a: 0.35,
+                            ..port_fill
+                        }
+                    } else {
+                        port_fill
+                    };
+                    frame.fill(&Path::circle(pos, PORT_RADIUS), fill);
+                    frame.fill_text(Text {
+                        content: slot.label(),
+                        position: Point::new(pos.x + PORT_RADIUS + PORT_LABEL_GAP, pos.y),
+                        color: muted_text,
+                        size: Pixels(PORT_LABEL_SIZE),
+                        font: Font::DEFAULT,
+                        align_x: alignment::Horizontal::Left.into(),
+                        align_y: alignment::Vertical::Center,
+                        ..Text::default()
+                    });
+                }
                 if let Some(info) = self.ports.get(&node.id) {
-                    for (index, port) in info.inputs.iter().enumerate() {
-                        let pos = port_position(node.position, size, index, false);
-                        frame.fill(&Path::circle(pos, PORT_RADIUS), port_fill);
-                        frame.fill_text(Text {
-                            content: port.clone(),
-                            position: Point::new(pos.x + PORT_RADIUS + PORT_LABEL_GAP, pos.y),
-                            color: muted_text,
-                            size: Pixels(PORT_LABEL_SIZE),
-                            font: Font::DEFAULT,
-                            align_x: alignment::Horizontal::Left.into(),
-                            align_y: alignment::Vertical::Center,
-                            ..Text::default()
-                        });
-                    }
                     for (index, port) in info.outputs.iter().enumerate() {
                         let pos = port_position(node.position, size, index, true);
                         frame.fill(
