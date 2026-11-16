@@ -1,6 +1,7 @@
 //! Iced Canvas DAG view with pan/zoom and always-on graph editing.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{Duration, Instant};
 
 use iced::alignment;
 use iced::mouse;
@@ -26,6 +27,8 @@ const PORT_LABEL_GAP: f32 = 6.0;
 const PORT_LABEL_SIZE: f32 = 11.0;
 /// Screen-space movement before a Simple node press becomes a connect drag.
 const CONNECT_DRAG_THRESHOLD: f32 = 6.0;
+/// Max interval between two clicks on the same node to count as a double-click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 
 /// Input/output port templates for a node type instance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -117,6 +120,11 @@ pub enum GraphEdit {
         port: String,
         /// Edge ids in the desired top→bottom order.
         ordered_edge_ids: Vec<String>,
+    },
+    /// Double-click a node card (present or missing) to open / resolve.
+    OpenNode {
+        /// Node that was double-clicked.
+        node_id: String,
     },
 }
 
@@ -461,17 +469,17 @@ impl GraphView {
         best.map(|(_, id, a, b)| (id, a, b))
     }
 
-    fn handle_select_click(&self, world: Point) -> Option<GraphEdit> {
+    fn handle_select_click(&self, state: &mut ViewState, world: Point) -> Option<GraphEdit> {
         if let Some(node) = self.hit_node(world) {
-            return Some(GraphEdit::SelectNode {
-                node_id: Some(node),
-            });
+            return Some(select_or_open_node(state, node));
         }
         if let Some((edge_id, _, _)) = self.hit_edge(world) {
+            state.last_node_click = None;
             return Some(GraphEdit::SelectEdge {
                 edge_id: Some(edge_id),
             });
         }
+        state.last_node_click = None;
         Some(GraphEdit::SelectNode { node_id: None })
     }
 
@@ -633,6 +641,8 @@ pub struct ViewState {
     reorder_drag: Option<VariadicReorderDrag>,
     connect_drag: Option<ConnectDrag>,
     pending_node_press: Option<PendingNodePress>,
+    /// Last node click used for double-click → [`GraphEdit::OpenNode`].
+    last_node_click: Option<(String, Instant)>,
     document_key: Option<u64>,
 }
 
@@ -646,8 +656,24 @@ impl Default for ViewState {
             reorder_drag: None,
             connect_drag: None,
             pending_node_press: None,
+            last_node_click: None,
             document_key: None,
         }
+    }
+}
+
+/// Select on first click; [`GraphEdit::OpenNode`] on a second click within [`DOUBLE_CLICK`].
+fn select_or_open_node(state: &mut ViewState, node_id: String) -> GraphEdit {
+    let now = Instant::now();
+    if let Some((prev_id, prev_at)) = &state.last_node_click {
+        if prev_id == &node_id && now.duration_since(*prev_at) <= DOUBLE_CLICK {
+            state.last_node_click = None;
+            return GraphEdit::OpenNode { node_id };
+        }
+    }
+    state.last_node_click = Some((node_id.clone(), now));
+    GraphEdit::SelectNode {
+        node_id: Some(node_id),
     }
 }
 
@@ -752,7 +778,7 @@ where
                     return Some(canvas::Action::capture());
                 }
 
-                if let Some(edit) = self.handle_select_click(world) {
+                if let Some(edit) = self.handle_select_click(state, world) {
                     return Some(canvas::Action::publish(Message::from(edit)).and_capture());
                 }
                 return Some(canvas::Action::capture());
@@ -789,13 +815,9 @@ where
                     return Some(canvas::Action::capture());
                 }
                 if let Some(pending) = state.pending_node_press.take() {
-                    // Click without becoming a connect drag → select.
-                    return Some(
-                        canvas::Action::publish(Message::from(GraphEdit::SelectNode {
-                            node_id: Some(pending.node_id),
-                        }))
-                        .and_capture(),
-                    );
+                    // Click without becoming a connect drag → select or double-click open.
+                    let edit = select_or_open_node(state, pending.node_id);
+                    return Some(canvas::Action::publish(Message::from(edit)).and_capture());
                 }
                 if state.drag_last.is_some() || state.panning {
                     state.drag_last = None;
@@ -1139,5 +1161,42 @@ mod tests {
         );
         assert!((screen.x - 400.0).abs() < 1e-3);
         assert!((screen.y - 300.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn select_or_open_emits_open_node_on_double_click() {
+        let mut state = ViewState::default();
+        assert_eq!(
+            select_or_open_node(&mut state, "ghost".into()),
+            GraphEdit::SelectNode {
+                node_id: Some("ghost".into())
+            }
+        );
+        assert_eq!(
+            select_or_open_node(&mut state, "ghost".into()),
+            GraphEdit::OpenNode {
+                node_id: "ghost".into()
+            }
+        );
+        // Third click starts a new select cycle.
+        assert_eq!(
+            select_or_open_node(&mut state, "ghost".into()),
+            GraphEdit::SelectNode {
+                node_id: Some("ghost".into())
+            }
+        );
+    }
+
+    #[test]
+    fn select_or_open_different_nodes_do_not_double_click() {
+        let mut state = ViewState::default();
+        assert!(matches!(
+            select_or_open_node(&mut state, "a".into()),
+            GraphEdit::SelectNode { .. }
+        ));
+        assert!(matches!(
+            select_or_open_node(&mut state, "b".into()),
+            GraphEdit::SelectNode { .. }
+        ));
     }
 }
