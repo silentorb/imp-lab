@@ -98,20 +98,17 @@ pub fn add_node_type_dialog<'a>(
     .into()
 }
 
-/// Node id / type editor for a selected node.
+/// Node id editor and read-only type label for a selected node.
 pub fn node_properties_editor<'a>(
     node_id: &str,
     rename_buffer: &str,
-    type_ids: Vec<String>,
-    selected_type: Option<String>,
+    node_type: &str,
     resolved: &'a ResolvedTheme,
     accessibility: &'a AccessibilityPreferences,
 ) -> Element<'a, GraphChromeMessage> {
     let body = font_size(resolved, accessibility);
     let input_size = scaled_text_size(resolved.input.font.size, accessibility);
     let input_pad = input_padding(resolved);
-    let combo_size = scaled_text_size(resolved.combo_box.font.size, accessibility);
-    let combo_pad = combo_box_padding(resolved);
 
     column![
         text(format!("Node: {node_id}")).size(body),
@@ -129,23 +126,8 @@ pub fn node_properties_editor<'a>(
             ))
             .style(styles::text_input(resolved))
             .width(Length::Fill),
-        button(at_least(text("Rename"), button_content_min_size(resolved)))
-            .on_press(GraphChromeMessage::RenameCommit)
-            .padding(button_padding(resolved))
-            .style(styles::button_primary(resolved)),
         text("Type:").size(body),
-        pick_list(type_ids, selected_type, GraphChromeMessage::SelectedTypeChanged)
-            .text_size(combo_size)
-            .padding(combo_pad)
-            .text_line_height(control_line_height(
-                resolved,
-                combo_size,
-                resolved.combo_box.min_height,
-                combo_pad,
-            ))
-            .handle(pick_list_handle::<Renderer>(resolved))
-            .style(styles::pick_list(resolved))
-            .menu_style(styles::menu(resolved)),
+        text(node_type.to_string()).size(body),
     ]
     .spacing(8)
     .into()
