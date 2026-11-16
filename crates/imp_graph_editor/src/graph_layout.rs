@@ -41,6 +41,8 @@ pub struct LaidOutNode {
     /// Optional display title; canvas shows this when present, else `id`.
     pub title: Option<String>,
     pub node_type: NodeTypeId,
+    /// True when this id appears only via edges (no local `Graph.nodes` entry).
+    pub missing: bool,
     /// Top-left corner of the node box in layout space.
     pub position: Point,
     /// Rendered box size used for packing and content bounds.
@@ -90,7 +92,13 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
     let mut digraph: DiGraph<NodeId, ()> = DiGraph::new();
     let mut index_by_id: BTreeMap<NodeId, NodeIndex> = BTreeMap::new();
 
-    for id in graph.nodes.keys() {
+    let mut all_ids: BTreeSet<NodeId> = graph.nodes.keys().cloned().collect();
+    for edge in graph.edges.values() {
+        all_ids.insert(edge.from.node.clone());
+        all_ids.insert(edge.to.node.clone());
+    }
+
+    for id in &all_ids {
         let index = digraph.add_node(id.clone());
         index_by_id.insert(id.clone(), index);
     }
@@ -98,11 +106,6 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
     let mut edge_pairs: BTreeSet<(NodeId, NodeId)> = BTreeSet::new();
     for edge in graph.edges.values() {
         if edge.from.node == edge.to.node {
-            continue;
-        }
-        if !index_by_id.contains_key(&edge.from.node)
-            || !index_by_id.contains_key(&edge.to.node)
-        {
             continue;
         }
         edge_pairs.insert((edge.from.node.clone(), edge.to.node.clone()));
@@ -127,13 +130,12 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
         nodes.sort();
     }
 
-    let column_width = graph
-        .nodes
-        .keys()
+    let column_width = all_ids
+        .iter()
         .map(|id| node_sizes.get(id).copied().unwrap_or(NODE_SIZE).width)
         .fold(NODE_SIZE.width, f32::max);
 
-    let mut laid_out = Vec::with_capacity(graph.nodes.len());
+    let mut laid_out = Vec::with_capacity(all_ids.len());
     let mut max_x = MARGIN;
     let mut max_y = MARGIN;
 
@@ -142,6 +144,7 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
         let mut y = MARGIN;
         for id in ids {
             let size = node_sizes.get(id).copied().unwrap_or(NODE_SIZE);
+            let missing = !graph.nodes.contains_key(id);
             let (title, node_type) = graph
                 .nodes
                 .get(id)
@@ -151,6 +154,7 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
                 id: id.clone(),
                 title,
                 node_type,
+                missing,
                 position: Point::new(x, y),
                 size,
             });
@@ -391,5 +395,57 @@ mod tests {
             right
         );
         assert!(right >= PRECISE_NODE_WIDTH + layout.origin.x - 1e-3);
+    }
+
+    #[test]
+    fn layouts_edge_only_ids_as_missing_nodes() {
+        let mut graph = Graph {
+            nodes: BTreeMap::new(),
+            edges: BTreeMap::new(),
+        };
+        graph.nodes.insert(
+            "present".into(),
+            imp_core_types::Node {
+                id: "present".into(),
+                title: Some("Present".into()),
+                node_type: "literal".into(),
+                type_args: vec![],
+                inputs: BTreeMap::new(),
+            },
+        );
+        graph.edges.insert(
+            "e".into(),
+            imp_core_types::Edge {
+                from: imp_core_types::PortReference {
+                    node: "ghost".into(),
+                    port: "value".into(),
+                },
+                to: imp_core_types::PortReference {
+                    node: "present".into(),
+                    port: "value".into(),
+                },
+                order: None,
+            },
+        );
+
+        let layout = layout_graph(&graph, &empty_sizes());
+        assert_eq!(layout.nodes.len(), 2);
+        let ghost = layout
+            .nodes
+            .iter()
+            .find(|n| n.id == "ghost")
+            .expect("ghost card");
+        assert!(ghost.missing);
+        assert!(ghost.node_type.is_empty());
+        let present = layout
+            .nodes
+            .iter()
+            .find(|n| n.id == "present")
+            .expect("present card");
+        assert!(!present.missing);
+        assert!(layout
+            .edges
+            .iter()
+            .any(|(from, to)| from == "ghost" && to == "present"));
     }
 }

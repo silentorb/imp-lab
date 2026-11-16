@@ -16,10 +16,11 @@ pub use graph_chrome::{
 };
 pub use properties_view::{properties_view, Property};
 pub use graph_edit::{
-    add_edge, add_node, auto_pair_ports, expand_input_slots, next_variadic_order, remove_edge,
-    remove_edges_at_port, remove_edges_between, remove_node, rename_node, reorder_variadic_inputs,
-    set_node_title, set_node_type, unique_edge_id, unique_node_id, unique_node_title, CatalogPort,
-    GraphEditError, InputSlot, NodeTypeCatalog,
+    add_edge, add_node, auto_pair_ports, erase_node_or_dangling, expand_input_slots,
+    next_variadic_order, remove_edge, remove_edges_at_port, remove_edges_between,
+    remove_edges_incident_to, remove_node, rename_node, reorder_variadic_inputs, set_node_title,
+    set_node_type, unique_edge_id, unique_node_id, unique_node_title, CatalogPort, GraphEditError,
+    InputSlot, NodeTypeCatalog,
 };
 pub use graph_layout::{
     layout_graph, node_size_for, GraphLayout, LaidOutNode, NODE_HEADER_HEIGHT, NODE_SIZE,

@@ -1,6 +1,6 @@
 //! Iced Canvas DAG view with pan/zoom and always-on graph editing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use iced::alignment;
 use iced::mouse;
@@ -208,9 +208,13 @@ impl GraphView {
                 )
             })
             .collect();
-        let input_slots: BTreeMap<NodeId, Vec<InputSlot>> = graph
-            .nodes
-            .keys()
+        let mut layout_ids: BTreeSet<NodeId> = graph.nodes.keys().cloned().collect();
+        for edge in graph.edges.values() {
+            layout_ids.insert(edge.from.node.clone());
+            layout_ids.insert(edge.to.node.clone());
+        }
+        let input_slots: BTreeMap<NodeId, Vec<InputSlot>> = layout_ids
+            .iter()
             .map(|id| {
                 let slots = ports
                     .get(id)
@@ -220,9 +224,8 @@ impl GraphView {
             })
             .collect();
         let precise = ui.connection_mode == ConnectionMode::Precise;
-        let node_sizes = graph
-            .nodes
-            .keys()
+        let node_sizes = layout_ids
+            .iter()
             .map(|id| {
                 let inputs = input_slots.get(id).map(|slots| slots.len()).unwrap_or(0);
                 let outputs = ports.get(id).map(|info| info.outputs.len()).unwrap_or(0);
@@ -884,6 +887,8 @@ where
         let selected_edge = palette.primary.strong.color;
         let node_fill = palette.background.weak.color;
         let node_selected = palette.primary.weak.color;
+        let missing_fill = palette.danger.weak.color;
+        let missing_selected = palette.danger.base.color;
         let node_border = palette.background.strong.color;
         let text_color = palette.background.base.text;
         let muted_text = palette.background.weak.text;
@@ -959,7 +964,17 @@ where
                 .as_ref()
                 .is_some_and(|d| d.from_node == node.id);
             let selected = self.selected_node.as_deref() == Some(node.id.as_str()) || connect_source;
-            let fill = if selected { node_selected } else { node_fill };
+            let fill = if node.missing {
+                if selected {
+                    missing_selected
+                } else {
+                    missing_fill
+                }
+            } else if selected {
+                node_selected
+            } else {
+                node_fill
+            };
             let rect = Path::rounded_rectangle(node.position, size, NODE_RADIUS.into());
             frame.fill(&rect, fill);
             frame.stroke(
@@ -982,8 +997,13 @@ where
                 font: Font::DEFAULT,
                 ..Text::default()
             });
+            let type_label = if node.missing {
+                "(missing)".to_string()
+            } else {
+                node.node_type.clone()
+            };
             frame.fill_text(Text {
-                content: node.node_type.clone(),
+                content: type_label,
                 position: Point::new(node.position.x + 10.0, node.position.y + 26.0),
                 color: muted_text,
                 size: Pixels(12.0),

@@ -143,10 +143,30 @@ pub fn remove_node(graph: &mut Graph, node_id: &str) -> Result<(), GraphEditErro
     if graph.nodes.remove(node_id).is_none() {
         return Err(GraphEditError::NodeMissing(node_id.to_string()));
     }
+    let _ = remove_edges_incident_to(graph, node_id);
+    Ok(())
+}
+
+/// Removes every edge that references `node_id` as an endpoint.
+///
+/// Used when erasing a missing (edge-only) card that has no `Graph.nodes` entry.
+pub fn remove_edges_incident_to(graph: &mut Graph, node_id: &str) -> usize {
+    let before = graph.edges.len();
     graph.edges.retain(|_, edge| {
         edge.from.node != node_id && edge.to.node != node_id
     });
-    Ok(())
+    before - graph.edges.len()
+}
+
+/// Removes a local node (and incident edges), or only incident edges when the id
+/// is absent from `Graph.nodes` (dangling / missing card).
+pub fn erase_node_or_dangling(graph: &mut Graph, node_id: &str) -> Result<(), GraphEditError> {
+    if graph.nodes.contains_key(node_id) {
+        remove_node(graph, node_id)
+    } else {
+        remove_edges_incident_to(graph, node_id);
+        Ok(())
+    }
 }
 
 /// Renames a node and rewrites edge endpoints that reference it.
@@ -621,6 +641,29 @@ mod tests {
         remove_node(&mut graph, "a").unwrap();
         assert!(!graph.nodes.contains_key("a"));
         assert!(graph.edges.is_empty());
+    }
+
+    #[test]
+    fn erase_dangling_strips_incident_edges_without_node_entry() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "b", "output", None).unwrap();
+        graph.edges.insert(
+            "ghost_to_b".into(),
+            Edge {
+                from: PortReference {
+                    node: "ghost".into(),
+                    port: "value".into(),
+                },
+                to: PortReference {
+                    node: "b".into(),
+                    port: "value".into(),
+                },
+                order: None,
+            },
+        );
+        erase_node_or_dangling(&mut graph, "ghost").unwrap();
+        assert!(graph.edges.is_empty());
+        assert!(graph.nodes.contains_key("b"));
     }
 
     #[test]
