@@ -9,10 +9,12 @@ mod graph_edit;
 mod graph_layout;
 mod graph_ui;
 mod graph_view;
+mod properties_view;
 
 pub use graph_chrome::{
     add_node_type_dialog, node_properties_editor, precise_ports_checkbox, GraphChromeMessage,
 };
+pub use properties_view::{properties_view, Property};
 pub use graph_edit::{
     add_edge, add_node, auto_pair_ports, expand_input_slots, next_variadic_order, remove_edge,
     remove_edges_at_port, remove_edges_between, remove_node, rename_node, reorder_variadic_inputs,

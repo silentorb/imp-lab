@@ -15,3 +15,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+iced_test = "0.14"
+

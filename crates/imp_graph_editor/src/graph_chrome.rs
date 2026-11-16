@@ -11,6 +11,7 @@ use native_theme_iced::{
 };
 
 use crate::graph_ui::ConnectionMode;
+use crate::properties_view::{properties_view, Property};
 
 /// Messages emitted by graph chrome building blocks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,33 +110,40 @@ pub fn node_properties_editor<'a>(
     let body = font_size(resolved, accessibility);
     let input_size = scaled_text_size(resolved.input.font.size, accessibility);
     let input_pad = input_padding(resolved);
-    let header = if title_buffer.trim().is_empty() {
-        format!("Node: {node_id}")
-    } else {
-        format!("Node: {title_buffer}")
-    };
 
-    column![
-        text(header).size(body),
-        text("Title:").size(body),
-        text_input("node title", title_buffer)
-            .on_input(GraphChromeMessage::TitleInput)
-            .on_submit(GraphChromeMessage::TitleCommit)
-            .size(input_size)
-            .padding(input_pad)
-            .line_height(control_line_height(
-                resolved,
-                input_size,
-                resolved.input.min_height,
-                input_pad,
-            ))
-            .style(styles::text_input(resolved))
-            .width(Length::Fill),
-        text("Id:").size(body),
-        text(node_id.to_string()).size(body),
-        text("Type:").size(body),
-        text(node_type.to_string()).size(body),
-    ]
-    .spacing(8)
-    .into()
+    let title_input = text_input("node title", title_buffer)
+        .on_input(GraphChromeMessage::TitleInput)
+        .on_submit(GraphChromeMessage::TitleCommit)
+        .size(input_size)
+        .padding(input_pad)
+        .line_height(control_line_height(
+            resolved,
+            input_size,
+            resolved.input.min_height,
+            input_pad,
+        ))
+        .style(styles::text_input(resolved))
+        .width(Length::Fill);
+
+    properties_view(
+        [
+            Property::new("Title", title_input),
+            Property::new(
+                "Id",
+                text(node_id.to_string())
+                    .size(body)
+                    .wrapping(text::Wrapping::Word)
+                    .width(Length::Fill),
+            ),
+            Property::new(
+                "Type",
+                text(node_type.to_string())
+                    .size(body)
+                    .wrapping(text::Wrapping::Word)
+                    .width(Length::Fill),
+            ),
+        ],
+        resolved,
+        accessibility,
+    )
 }
