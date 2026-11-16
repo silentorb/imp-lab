@@ -252,6 +252,24 @@ pub fn remove_edges_between(graph: &mut Graph, a: &str, b: &str) -> usize {
     before - graph.edges.len()
 }
 
+/// Removes every edge attached to `node_id`/`port_id` as an output or input.
+pub fn remove_edges_at_port(
+    graph: &mut Graph,
+    node_id: &str,
+    port_id: &str,
+    is_output: bool,
+) -> usize {
+    let before = graph.edges.len();
+    graph.edges.retain(|_, edge| {
+        if is_output {
+            !(edge.from.node == node_id && edge.from.port == port_id)
+        } else {
+            !(edge.to.node == node_id && edge.to.port == port_id)
+        }
+    });
+    before - graph.edges.len()
+}
+
 /// Rewrites `Edge.order` for a variadic fan-in to match `ordered_edge_ids` (`0..n-1`).
 pub fn reorder_variadic_inputs(
     graph: &mut Graph,
@@ -550,6 +568,21 @@ mod tests {
         assert_eq!(from_port, "value");
         assert_eq!(to_port, "frequency");
         assert!(!variadic);
+    }
+
+    #[test]
+    fn remove_edges_at_port_clears_output_or_input() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "parameter").unwrap();
+        add_node(&mut graph, "b", "sine").unwrap();
+        add_node(&mut graph, "c", "sine").unwrap();
+        add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
+        add_edge(&mut graph, "a", "value", "c", "frequency", false).unwrap();
+        assert_eq!(remove_edges_at_port(&mut graph, "a", "value", true), 2);
+        assert!(graph.edges.is_empty());
+        add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
+        assert_eq!(remove_edges_at_port(&mut graph, "b", "frequency", false), 1);
+        assert!(graph.edges.is_empty());
     }
 
     #[test]

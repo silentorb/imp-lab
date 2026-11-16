@@ -2,23 +2,25 @@
 //!
 //! Hosts compose these into a full chrome story (panes, commands, menus).
 
-use iced::widget::{button, checkbox, column, pick_list, row, text, text_input};
-use iced::{Element, Length, Renderer};
+use iced::widget::{button, checkbox, column, pick_list, row, text, text_input, Space};
+use iced::{Element, Fill, Length, Renderer};
 use native_theme_iced::{
     at_least, button_content_min_size, button_padding, combo_box_padding, control_line_height,
     font_size, input_padding, pick_list_handle, scaled_text_size, styles, AccessibilityPreferences,
     ResolvedTheme,
 };
 
-use crate::graph_ui::{ConnectionMode, GraphTool};
+use crate::graph_ui::ConnectionMode;
 
 /// Messages emitted by graph chrome building blocks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GraphChromeMessage {
-    /// Activate a modal tool.
-    SetTool(GraphTool),
-    /// Choose the Add-tool node type.
+    /// Choose the Add-node dialog type.
     SetAddNodeType(String),
+    /// Confirm Add-node dialog (insert with current type).
+    AddNodeConfirm,
+    /// Cancel Add-node dialog.
+    AddNodeCancel,
     /// Toggle simple vs precise connection UI.
     SetConnectionMode(ConnectionMode),
     /// Rename buffer edited.
@@ -27,77 +29,6 @@ pub enum GraphChromeMessage {
     RenameCommit,
     /// Change the selected node's type.
     SelectedTypeChanged(String),
-}
-
-fn tool_button<'a>(
-    label: &'a str,
-    active: bool,
-    message: GraphChromeMessage,
-    resolved: &ResolvedTheme,
-) -> iced::widget::Button<'a, GraphChromeMessage> {
-    button(at_least(text(label), button_content_min_size(resolved)))
-        .on_press(message)
-        .padding(button_padding(resolved))
-        .style(styles::button_toggle(resolved, active))
-}
-
-/// Select / Add / Connect / Erase tool buttons.
-pub fn tool_strip<'a>(
-    active: GraphTool,
-    resolved: &'a ResolvedTheme,
-) -> Element<'a, GraphChromeMessage> {
-    row![
-        tool_button(
-            "Select",
-            active == GraphTool::Select,
-            GraphChromeMessage::SetTool(GraphTool::Select),
-            resolved,
-        ),
-        tool_button(
-            "Add",
-            active == GraphTool::Add,
-            GraphChromeMessage::SetTool(GraphTool::Add),
-            resolved,
-        ),
-        tool_button(
-            "Connect",
-            active == GraphTool::Connect,
-            GraphChromeMessage::SetTool(GraphTool::Connect),
-            resolved,
-        ),
-        tool_button(
-            "Erase",
-            active == GraphTool::Erase,
-            GraphChromeMessage::SetTool(GraphTool::Erase),
-            resolved,
-        ),
-    ]
-    .spacing(6)
-    .into()
-}
-
-/// Node-type picker for the Add tool.
-pub fn add_type_picker<'a>(
-    type_ids: Vec<String>,
-    selected: String,
-    resolved: &'a ResolvedTheme,
-    accessibility: &'a AccessibilityPreferences,
-) -> Element<'a, GraphChromeMessage> {
-    let size = scaled_text_size(resolved.combo_box.font.size, accessibility);
-    let padding = combo_box_padding(resolved);
-    pick_list(type_ids, Some(selected), GraphChromeMessage::SetAddNodeType)
-        .text_size(size)
-        .padding(padding)
-        .text_line_height(control_line_height(
-            resolved,
-            size,
-            resolved.combo_box.min_height,
-            padding,
-        ))
-        .handle(pick_list_handle::<Renderer>(resolved))
-        .style(styles::pick_list(resolved))
-        .menu_style(styles::menu(resolved))
-        .into()
 }
 
 /// Precise-ports checkbox (hosts may wrap this in a menu).
@@ -119,6 +50,52 @@ pub fn precise_ports_checkbox<'a>(
         .style(styles::checkbox(resolved))
         .width(Length::Fill)
         .into()
+}
+
+/// Add-node type picker dialog body (pick list + Add / Cancel).
+pub fn add_node_type_dialog<'a>(
+    type_ids: Vec<String>,
+    selected: String,
+    resolved: &'a ResolvedTheme,
+    accessibility: &'a AccessibilityPreferences,
+) -> Element<'a, GraphChromeMessage> {
+    let body = font_size(resolved, accessibility);
+    let size = scaled_text_size(resolved.combo_box.font.size, accessibility);
+    let padding = combo_box_padding(resolved);
+
+    column![
+        text("Add node").size(body),
+        text("Type:").size(body),
+        pick_list(type_ids, Some(selected), GraphChromeMessage::SetAddNodeType)
+            .text_size(size)
+            .padding(padding)
+            .text_line_height(control_line_height(
+                resolved,
+                size,
+                resolved.combo_box.min_height,
+                padding,
+            ))
+            .handle(pick_list_handle::<Renderer>(resolved))
+            .style(styles::pick_list(resolved))
+            .menu_style(styles::menu(resolved))
+            .width(Length::Fill),
+        row![
+            button(at_least(text("Cancel"), button_content_min_size(resolved)))
+                .on_press(GraphChromeMessage::AddNodeCancel)
+                .padding(button_padding(resolved))
+                .style(styles::button(resolved)),
+            Space::new().width(Fill),
+            button(at_least(text("Add"), button_content_min_size(resolved)))
+                .on_press(GraphChromeMessage::AddNodeConfirm)
+                .padding(button_padding(resolved))
+                .style(styles::button_primary(resolved)),
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center),
+    ]
+    .spacing(12)
+    .padding(16)
+    .into()
 }
 
 /// Node id / type editor for a selected node.

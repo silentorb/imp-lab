@@ -1,4 +1,4 @@
-//! Iced Canvas DAG view with pan/zoom and modal graph editing.
+//! Iced Canvas DAG view with pan/zoom and always-on graph editing.
 
 use std::collections::BTreeMap;
 
@@ -12,7 +12,7 @@ use crate::graph_edit::{expand_input_slots, CatalogPort, InputSlot};
 use crate::graph_layout::{
     layout_graph, node_size_for, GraphLayout, NODE_HEADER_HEIGHT, PORT_SPACING,
 };
-use crate::graph_ui::{ConnectionMode, GraphTool, GraphUiState};
+use crate::graph_ui::{ConnectionMode, GraphUiState};
 use imp_core_types::{EdgeId, Graph, NodeId};
 
 const MIN_SCALE: f32 = 0.25;
@@ -24,6 +24,8 @@ const PORT_HIT_RADIUS: f32 = 10.0;
 const EDGE_HIT_DISTANCE: f32 = 8.0;
 const PORT_LABEL_GAP: f32 = 6.0;
 const PORT_LABEL_SIZE: f32 = 11.0;
+/// Screen-space movement before a Simple node press becomes a connect drag.
+const CONNECT_DRAG_THRESHOLD: f32 = 6.0;
 
 /// Input/output port templates for a node type instance.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -50,7 +52,7 @@ pub enum GraphEdit {
         /// Edge id, or `None` to clear.
         edge_id: Option<String>,
     },
-    /// Insert a node of the current Add type.
+    /// Insert a node of the host's current add type.
     AddNode,
     /// Simple-mode connect between two nodes.
     ConnectNodes {
@@ -97,6 +99,15 @@ pub enum GraphEdit {
         a: String,
         /// Other endpoint.
         b: String,
+    },
+    /// Disconnect every edge attached to a port (right-click).
+    DisconnectPort {
+        /// Node owning the port.
+        node_id: String,
+        /// Port id.
+        port_id: String,
+        /// `true` for an output port; `false` for an input.
+        is_output: bool,
     },
     /// Reorder variadic inbound edges to `ordered_edge_ids` (`0..n-1`).
     ReorderVariadicInputs {
@@ -166,12 +177,9 @@ fn port_position(node_pos: Point, size: Size, index: usize, is_output: bool) -> 
 pub struct GraphView {
     layout: GraphLayout,
     document_key: u64,
-    tool: GraphTool,
     connection_mode: ConnectionMode,
     selected_node: Option<String>,
     selected_edge: Option<String>,
-    connect_from_node: Option<String>,
-    connect_from_port: Option<String>,
     ports: PortCatalog,
     /// Expanded Precise input slots per node (includes variadic dummies).
     input_slots: BTreeMap<NodeId, Vec<InputSlot>>,
@@ -224,18 +232,28 @@ impl GraphView {
         Self {
             layout: layout_graph(graph, &node_sizes),
             document_key,
-            tool: ui.tool,
             connection_mode: ui.connection_mode,
             selected_node: ui.selected_node.clone(),
             selected_edge: ui.selected_edge.clone(),
-            connect_from_node: ui.connect_draft.as_ref().map(|d| d.from_node.clone()),
-            connect_from_port: ui
-                .connect_draft
-                .as_ref()
-                .and_then(|d| d.from_port.clone()),
             ports,
             input_slots,
             edges,
+        }
+    }
+
+    fn connect_source_point(&self, from_node: &str, from_port: Option<&str>) -> Option<Point> {
+        let node = self.layout.nodes.iter().find(|n| n.id == from_node)?;
+        let size = self.size_of(from_node);
+        if self.connection_mode == ConnectionMode::Precise {
+            let port = from_port?;
+            let info = self.ports.get(from_node)?;
+            let index = info.outputs.iter().position(|p| p == port).unwrap_or(0);
+            Some(port_position(node.position, size, index, true))
+        } else {
+            Some(Point::new(
+                node.position.x + size.width,
+                node.position.y + size.height / 2.0,
+            ))
         }
     }
 
@@ -264,6 +282,8 @@ impl GraphView {
         state.drag_last = None;
         state.panning = false;
         state.reorder_drag = None;
+        state.connect_drag = None;
+        state.pending_node_press = None;
     }
 
     fn screen_to_world(&self, state: &ViewState, bounds: Size, screen: Point) -> Point {
@@ -438,95 +458,73 @@ impl GraphView {
         best.map(|(_, id, a, b)| (id, a, b))
     }
 
-    fn handle_click(&self, world: Point) -> Option<GraphEdit> {
-        match self.tool {
-            GraphTool::Select => {
-                if let Some(node) = self.hit_node(world) {
-                    return Some(GraphEdit::SelectNode {
-                        node_id: Some(node),
-                    });
-                }
-                if let Some((edge_id, _, _)) = self.hit_edge(world) {
-                    return Some(GraphEdit::SelectEdge {
-                        edge_id: Some(edge_id),
-                    });
-                }
-                Some(GraphEdit::SelectNode {
-                    node_id: None,
-                })
-            }
-            GraphTool::Add => {
-                if self.hit_node(world).is_some() || self.hit_edge(world).is_some() {
-                    return None;
-                }
-                Some(GraphEdit::AddNode)
-            }
-            GraphTool::Connect => {
-                if self.connection_mode == ConnectionMode::Precise {
-                    if let Some((node, port)) = self.hit_output_port(world) {
-                        return Some(GraphEdit::BeginConnect {
-                            from_node: node,
-                            from_port: Some(port),
-                        });
-                    }
-                    if let Some((node, _, slot)) = self.hit_input_slot(world) {
-                        if slot.accepts_connect() {
-                            if let (Some(from_node), Some(from_port)) =
-                                (&self.connect_from_node, &self.connect_from_port)
-                            {
-                                let variadic_target =
-                                    matches!(slot, InputSlot::VariadicDummy { .. });
-                                return Some(GraphEdit::ConnectPorts {
-                                    from_node: from_node.clone(),
-                                    from_port: from_port.clone(),
-                                    to_node: node,
-                                    to_port: slot.port_id().to_string(),
-                                    variadic_target,
-                                });
-                            }
-                        }
-                    }
-                    return Some(GraphEdit::CancelConnect);
-                }
-
-                // Simple: click source then target.
-                let Some(node) = self.hit_node(world) else {
-                    return Some(GraphEdit::CancelConnect);
-                };
-                if let Some(from) = &self.connect_from_node {
-                    if from == &node {
-                        return Some(GraphEdit::CancelConnect);
-                    }
-                    return Some(GraphEdit::ConnectNodes {
-                        from: from.clone(),
-                        to: node,
-                    });
-                }
-                Some(GraphEdit::BeginConnect {
-                    from_node: node,
-                    from_port: None,
-                })
-            }
-            GraphTool::Erase => {
-                if let Some(node) = self.hit_node(world) {
-                    return Some(GraphEdit::EraseNode {
-                        node_id: node,
-                    });
-                }
-                if let Some((edge_id, a, b)) = self.hit_edge(world) {
-                    if self.connection_mode == ConnectionMode::Simple {
-                        return Some(GraphEdit::EraseEdgesBetween {
-                            a,
-                            b,
-                        });
-                    }
-                    return Some(GraphEdit::EraseEdge {
-                        edge_id,
-                    });
-                }
-                None
-            }
+    fn handle_select_click(&self, world: Point) -> Option<GraphEdit> {
+        if let Some(node) = self.hit_node(world) {
+            return Some(GraphEdit::SelectNode {
+                node_id: Some(node),
+            });
         }
+        if let Some((edge_id, _, _)) = self.hit_edge(world) {
+            return Some(GraphEdit::SelectEdge {
+                edge_id: Some(edge_id),
+            });
+        }
+        Some(GraphEdit::SelectNode { node_id: None })
+    }
+
+    fn handle_port_disconnect(&self, world: Point) -> Option<GraphEdit> {
+        if self.connection_mode != ConnectionMode::Precise {
+            return None;
+        }
+        if let Some((node, port)) = self.hit_output_port(world) {
+            return Some(GraphEdit::DisconnectPort {
+                node_id: node,
+                port_id: port,
+                is_output: true,
+            });
+        }
+        if let Some((node, _, slot)) = self.hit_input_slot(world) {
+            if matches!(slot, InputSlot::VariadicDummy { .. }) {
+                return None;
+            }
+            return Some(GraphEdit::DisconnectPort {
+                node_id: node,
+                port_id: slot.port_id().to_string(),
+                is_output: false,
+            });
+        }
+        None
+    }
+
+    fn connect_drop_edit(
+        &self,
+        from_node: &str,
+        from_port: Option<&str>,
+        world: Point,
+    ) -> Option<GraphEdit> {
+        if self.connection_mode == ConnectionMode::Precise {
+            let from_port = from_port?;
+            let (to_node, _, slot) = self.hit_input_slot(world)?;
+            if !slot.accepts_connect() {
+                return None;
+            }
+            let variadic_target = matches!(slot, InputSlot::VariadicDummy { .. });
+            return Some(GraphEdit::ConnectPorts {
+                from_node: from_node.to_string(),
+                from_port: from_port.to_string(),
+                to_node,
+                to_port: slot.port_id().to_string(),
+                variadic_target,
+            });
+        }
+        let to = self.hit_node(world)?;
+        if to == from_node {
+            return None;
+        }
+        Some(GraphEdit::ConnectNodes {
+            from: from_node.to_string(),
+            to,
+        })
     }
 
     fn reorder_edit_for_drop(
@@ -607,6 +605,21 @@ struct VariadicReorderDrag {
     edge_id: String,
 }
 
+/// In-progress connect drag (rubber-band), local to the canvas widget.
+#[derive(Debug, Clone)]
+struct ConnectDrag {
+    from_node: String,
+    from_port: Option<String>,
+    cursor_world: Point,
+}
+
+/// Simple-mode node press that may become a connect drag after a threshold.
+#[derive(Debug, Clone)]
+struct PendingNodePress {
+    node_id: String,
+    start_screen: Point,
+}
+
 /// Pan/zoom camera stored in the canvas widget tree.
 #[derive(Debug, Clone)]
 pub struct ViewState {
@@ -615,6 +628,8 @@ pub struct ViewState {
     drag_last: Option<Point>,
     panning: bool,
     reorder_drag: Option<VariadicReorderDrag>,
+    connect_drag: Option<ConnectDrag>,
+    pending_node_press: Option<PendingNodePress>,
     document_key: Option<u64>,
 }
 
@@ -626,6 +641,8 @@ impl Default for ViewState {
             drag_last: None,
             panning: false,
             reorder_drag: None,
+            connect_drag: None,
+            pending_node_press: None,
             document_key: None,
         }
     }
@@ -667,18 +684,36 @@ where
         match event {
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Middle)) => {
                 if let Some(position) = cursor_in_bounds {
+                    state.connect_drag = None;
+                    state.pending_node_press = None;
                     state.drag_last = Some(position);
                     state.panning = true;
                     return Some(canvas::Action::capture());
                 }
             }
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                let position = cursor_in_bounds?;
+                let world = self.screen_to_world(state, bounds.size(), position);
+                if let Some(edit) = self.handle_port_disconnect(world) {
+                    return Some(canvas::Action::publish(Message::from(edit)).and_capture());
+                }
+                return Some(canvas::Action::capture());
+            }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
                 let position = cursor_in_bounds?;
                 let world = self.screen_to_world(state, bounds.size(), position);
+                state.connect_drag = None;
+                state.pending_node_press = None;
 
-                if self.tool == GraphTool::Select
-                    && self.connection_mode == ConnectionMode::Precise
-                {
+                if self.connection_mode == ConnectionMode::Precise {
+                    if let Some((node, port)) = self.hit_output_port(world) {
+                        state.connect_drag = Some(ConnectDrag {
+                            from_node: node,
+                            from_port: Some(port),
+                            cursor_world: world,
+                        });
+                        return Some(canvas::Action::capture());
+                    }
                     if let Some((
                         node_id,
                         _,
@@ -695,13 +730,18 @@ where
                         state.drag_last = Some(position);
                         return Some(canvas::Action::capture());
                     }
+                } else if let Some(node) = self.hit_node(world) {
+                    state.pending_node_press = Some(PendingNodePress {
+                        node_id: node,
+                        start_screen: position,
+                    });
+                    return Some(canvas::Action::capture());
                 }
 
                 let hit = self.hit_node(world).is_some()
                     || self.hit_edge(world).is_some()
                     || self.hit_input_slot(world).is_some()
-                    || self.hit_output_port(world).is_some()
-                    || self.tool == GraphTool::Add;
+                    || self.hit_output_port(world).is_some();
 
                 if !hit {
                     state.drag_last = Some(position);
@@ -709,7 +749,7 @@ where
                     return Some(canvas::Action::capture());
                 }
 
-                if let Some(edit) = self.handle_click(world) {
+                if let Some(edit) = self.handle_select_click(world) {
                     return Some(canvas::Action::publish(Message::from(edit)).and_capture());
                 }
                 return Some(canvas::Action::capture());
@@ -729,6 +769,31 @@ where
                     }
                     return Some(canvas::Action::capture());
                 }
+                if let Some(drag) = state.connect_drag.take() {
+                    let position = cursor_in_bounds.or(state.drag_last);
+                    let Some(position) = position else {
+                        return Some(canvas::Action::capture());
+                    };
+                    let world = self.screen_to_world(state, bounds.size(), position);
+                    state.drag_last = None;
+                    if let Some(edit) = self.connect_drop_edit(
+                        &drag.from_node,
+                        drag.from_port.as_deref(),
+                        world,
+                    ) {
+                        return Some(canvas::Action::publish(Message::from(edit)).and_capture());
+                    }
+                    return Some(canvas::Action::capture());
+                }
+                if let Some(pending) = state.pending_node_press.take() {
+                    // Click without becoming a connect drag → select.
+                    return Some(
+                        canvas::Action::publish(Message::from(GraphEdit::SelectNode {
+                            node_id: Some(pending.node_id),
+                        }))
+                        .and_capture(),
+                    );
+                }
                 if state.drag_last.is_some() || state.panning {
                     state.drag_last = None;
                     state.panning = false;
@@ -743,6 +808,26 @@ where
                 }
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let Some(position) = cursor_in_bounds {
+                    let world = self.screen_to_world(state, bounds.size(), position);
+                    if let Some(pending) = state.pending_node_press.take() {
+                        let dx = position.x - pending.start_screen.x;
+                        let dy = position.y - pending.start_screen.y;
+                        if dx.hypot(dy) >= CONNECT_DRAG_THRESHOLD {
+                            state.connect_drag = Some(ConnectDrag {
+                                from_node: pending.node_id,
+                                from_port: None,
+                                cursor_world: world,
+                            });
+                            return Some(canvas::Action::request_redraw().and_capture());
+                        }
+                        state.pending_node_press = Some(pending);
+                    }
+                    if let Some(drag) = state.connect_drag.as_mut() {
+                        drag.cursor_world = world;
+                        return Some(canvas::Action::request_redraw().and_capture());
+                    }
+                }
                 if state.reorder_drag.is_some() {
                     if let Some(position) = cursor_in_bounds {
                         state.drag_last = Some(position);
@@ -803,6 +888,7 @@ where
         let text_color = palette.background.base.text;
         let muted_text = palette.background.weak.text;
         let port_fill = palette.primary.base.color;
+        let draft_color = palette.primary.base.color;
 
         let stroke_width = 1.5 / scale.max(0.25);
 
@@ -847,10 +933,32 @@ where
             }
         }
 
+        if let Some(drag) = &state.connect_drag {
+            if let Some(start) =
+                self.connect_source_point(&drag.from_node, drag.from_port.as_deref())
+            {
+                let mut path = Builder::new();
+                path.move_to(start);
+                path.line_to(drag.cursor_world);
+                frame.stroke(
+                    &path.build(),
+                    Stroke::default()
+                        .with_width(stroke_width)
+                        .with_color(Color {
+                            a: 0.85,
+                            ..draft_color
+                        }),
+                );
+            }
+        }
+
         for node in &self.layout.nodes {
             let size = node.size;
-            let selected = self.selected_node.as_deref() == Some(node.id.as_str())
-                || self.connect_from_node.as_deref() == Some(node.id.as_str());
+            let connect_source = state
+                .connect_drag
+                .as_ref()
+                .is_some_and(|d| d.from_node == node.id);
+            let selected = self.selected_node.as_deref() == Some(node.id.as_str()) || connect_source;
             let fill = if selected { node_selected } else { node_fill };
             let rect = Path::rounded_rectangle(node.position, size, NODE_RADIUS.into());
             frame.fill(&rect, fill);
@@ -939,11 +1047,10 @@ where
         if state.panning {
             mouse::Interaction::Grabbing
         } else if cursor.is_over(bounds) {
-            match self.tool {
-                GraphTool::Add | GraphTool::Connect | GraphTool::Erase => {
-                    mouse::Interaction::Crosshair
-                }
-                GraphTool::Select => mouse::Interaction::Pointer,
+            if state.connect_drag.is_some() {
+                mouse::Interaction::Crosshair
+            } else {
+                mouse::Interaction::Pointer
             }
         } else {
             mouse::Interaction::default()
