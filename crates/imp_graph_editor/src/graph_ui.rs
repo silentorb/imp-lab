@@ -73,8 +73,8 @@ pub struct GraphUiState {
     pub selected_edge: Option<String>,
     /// Draft connection start.
     pub connect_draft: Option<ConnectDraft>,
-    /// Rename field text when a node is selected (mirrors id until committed).
-    pub rename_buffer: String,
+    /// Title field text when a node is selected (mirrors title until committed).
+    pub title_buffer: String,
 }
 
 impl GraphUiState {
@@ -100,7 +100,7 @@ impl GraphUiState {
             selected_node: None,
             selected_edge: None,
             connect_draft: None,
-            rename_buffer: String::new(),
+            title_buffer: String::new(),
         }
     }
 
@@ -117,14 +117,14 @@ impl GraphUiState {
         self.selected_node = None;
         self.selected_edge = None;
         self.connect_draft = None;
-        self.rename_buffer.clear();
+        self.title_buffer.clear();
     }
 
-    /// Selects a node and seeds the rename buffer.
-    pub fn select_node(&mut self, node_id: Option<String>) {
+    /// Selects a node and seeds the title buffer.
+    pub fn select_node(&mut self, node_id: Option<String>, title: impl Into<String>) {
         self.selected_edge = None;
         self.connect_draft = None;
-        self.rename_buffer = node_id.clone().unwrap_or_default();
+        self.title_buffer = title.into();
         self.selected_node = node_id;
     }
 
@@ -132,7 +132,7 @@ impl GraphUiState {
     pub fn select_edge(&mut self, edge_id: Option<String>) {
         self.selected_node = None;
         self.connect_draft = None;
-        self.rename_buffer.clear();
+        self.title_buffer.clear();
         self.selected_edge = edge_id;
     }
 }

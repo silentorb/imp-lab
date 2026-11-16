@@ -969,8 +969,13 @@ where
                     .with_color(node_border),
             );
 
+            let label = node
+                .title
+                .as_deref()
+                .filter(|title| !title.is_empty())
+                .unwrap_or(node.id.as_str());
             frame.fill_text(Text {
-                content: node.id.clone(),
+                content: label.to_string(),
                 position: Point::new(node.position.x + 10.0, node.position.y + 8.0),
                 color: text_color,
                 size: Pixels(14.0),

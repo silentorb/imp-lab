@@ -16,8 +16,8 @@ pub use graph_chrome::{
 pub use graph_edit::{
     add_edge, add_node, auto_pair_ports, expand_input_slots, next_variadic_order, remove_edge,
     remove_edges_at_port, remove_edges_between, remove_node, rename_node, reorder_variadic_inputs,
-    set_node_type, unique_edge_id, unique_node_id, CatalogPort, GraphEditError, InputSlot,
-    NodeTypeCatalog,
+    set_node_title, set_node_type, unique_edge_id, unique_node_id, unique_node_title, CatalogPort,
+    GraphEditError, InputSlot, NodeTypeCatalog,
 };
 pub use graph_layout::{
     layout_graph, node_size_for, GraphLayout, LaidOutNode, NODE_HEADER_HEIGHT, NODE_SIZE,

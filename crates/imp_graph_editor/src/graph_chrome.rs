@@ -23,10 +23,10 @@ pub enum GraphChromeMessage {
     AddNodeCancel,
     /// Toggle simple vs precise connection UI.
     SetConnectionMode(ConnectionMode),
-    /// Rename buffer edited.
-    RenameInput(String),
-    /// Commit the rename buffer.
-    RenameCommit,
+    /// Title buffer edited.
+    TitleInput(String),
+    /// Commit the title buffer.
+    TitleCommit,
     /// Change the selected node's type.
     SelectedTypeChanged(String),
 }
@@ -98,10 +98,10 @@ pub fn add_node_type_dialog<'a>(
     .into()
 }
 
-/// Node id editor and read-only type label for a selected node.
+/// Title editor plus read-only id and type labels for a selected node.
 pub fn node_properties_editor<'a>(
     node_id: &str,
-    rename_buffer: &str,
+    title_buffer: &str,
     node_type: &str,
     resolved: &'a ResolvedTheme,
     accessibility: &'a AccessibilityPreferences,
@@ -109,13 +109,18 @@ pub fn node_properties_editor<'a>(
     let body = font_size(resolved, accessibility);
     let input_size = scaled_text_size(resolved.input.font.size, accessibility);
     let input_pad = input_padding(resolved);
+    let header = if title_buffer.trim().is_empty() {
+        format!("Node: {node_id}")
+    } else {
+        format!("Node: {title_buffer}")
+    };
 
     column![
-        text(format!("Node: {node_id}")).size(body),
-        text("Id:").size(body),
-        text_input("node id", rename_buffer)
-            .on_input(GraphChromeMessage::RenameInput)
-            .on_submit(GraphChromeMessage::RenameCommit)
+        text(header).size(body),
+        text("Title:").size(body),
+        text_input("node title", title_buffer)
+            .on_input(GraphChromeMessage::TitleInput)
+            .on_submit(GraphChromeMessage::TitleCommit)
             .size(input_size)
             .padding(input_pad)
             .line_height(control_line_height(
@@ -126,6 +131,8 @@ pub fn node_properties_editor<'a>(
             ))
             .style(styles::text_input(resolved))
             .width(Length::Fill),
+        text("Id:").size(body),
+        text(node_id.to_string()).size(body),
         text("Type:").size(body),
         text(node_type.to_string()).size(body),
     ]

@@ -79,11 +79,35 @@ pub fn unique_node_id(graph: &Graph, base: &str) -> NodeId {
     }
 }
 
-/// Inserts a node with empty inputs.
+/// Allocates a unique display title derived from `base` (`sine`, `sine_2`, …).
+///
+/// Uniqueness is among existing present titles only; nodes without a title are ignored.
+pub fn unique_node_title(graph: &Graph, base: &str) -> String {
+    let base = if base.trim().is_empty() { "node" } else { base };
+    let titles: std::collections::BTreeSet<&str> = graph
+        .nodes
+        .values()
+        .filter_map(|node| node.title.as_deref())
+        .collect();
+    if !titles.contains(base) {
+        return base.to_string();
+    }
+    let mut index = 2u32;
+    loop {
+        let candidate = format!("{base}_{index}");
+        if !titles.contains(candidate.as_str()) {
+            return candidate;
+        }
+        index += 1;
+    }
+}
+
+/// Inserts a node with empty inputs and an optional display title.
 pub fn add_node(
     graph: &mut Graph,
     id: impl Into<NodeId>,
     node_type: impl Into<String>,
+    title: Option<String>,
 ) -> Result<NodeId, GraphEditError> {
     let id = id.into();
     if id.trim().is_empty() {
@@ -93,10 +117,19 @@ pub fn add_node(
         return Err(GraphEditError::NodeExists(id));
     }
     let node_type = node_type.into();
+    let title = title.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
     graph.nodes.insert(
         id.clone(),
         Node {
             id: id.clone(),
+            title,
             node_type,
             type_args: Vec::new(),
             inputs: BTreeMap::new(),
@@ -146,6 +179,28 @@ pub fn rename_node(
         }
     }
     Ok(new_id)
+}
+
+/// Sets or clears a node's optional display title.
+///
+/// Empty / whitespace-only values clear the title (`None`).
+pub fn set_node_title(
+    graph: &mut Graph,
+    node_id: &str,
+    title: Option<String>,
+) -> Result<(), GraphEditError> {
+    let Some(node) = graph.nodes.get_mut(node_id) else {
+        return Err(GraphEditError::NodeMissing(node_id.to_string()));
+    };
+    node.title = title.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+    Ok(())
 }
 
 /// Changes a node's type and clears instance literals / type args.
@@ -529,17 +584,39 @@ mod tests {
     #[test]
     fn unique_node_id_increments() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "sine", "sine").unwrap();
+        add_node(&mut graph, "sine", "sine", None).unwrap();
         assert_eq!(unique_node_id(&graph, "sine"), "sine_2");
-        add_node(&mut graph, "sine_2", "sine").unwrap();
+        add_node(&mut graph, "sine_2", "sine", None).unwrap();
         assert_eq!(unique_node_id(&graph, "sine"), "sine_3");
+    }
+
+    #[test]
+    fn unique_node_title_increments_among_titles() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "sine", Some("sine".into())).unwrap();
+        assert_eq!(unique_node_title(&graph, "sine"), "sine_2");
+        add_node(&mut graph, "b", "sine", Some("sine_2".into())).unwrap();
+        assert_eq!(unique_node_title(&graph, "sine"), "sine_3");
+        // Untitled nodes do not reserve the title namespace.
+        add_node(&mut graph, "c", "sine", None).unwrap();
+        assert_eq!(unique_node_title(&graph, "other"), "other");
+    }
+
+    #[test]
+    fn set_node_title_clears_blank() {
+        let mut graph = empty_graph();
+        add_node(&mut graph, "a", "sine", Some("osc".into())).unwrap();
+        set_node_title(&mut graph, "a", Some("  ".into())).unwrap();
+        assert_eq!(graph.nodes["a"].title, None);
+        set_node_title(&mut graph, "a", Some("freq".into())).unwrap();
+        assert_eq!(graph.nodes["a"].title.as_deref(), Some("freq"));
     }
 
     #[test]
     fn remove_node_drops_incident_edges() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "sine").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "sine", None).unwrap();
         add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
         remove_node(&mut graph, "a").unwrap();
         assert!(!graph.nodes.contains_key("a"));
@@ -549,8 +626,8 @@ mod tests {
     #[test]
     fn rename_rewrites_edges() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "sine").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "sine", None).unwrap();
         add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
         rename_node(&mut graph, "a", "freq").unwrap();
         let edge = graph.edges.values().next().unwrap();
@@ -561,8 +638,8 @@ mod tests {
     fn auto_pair_prefers_matching_types() {
         let catalog = stub_catalog();
         let mut graph = empty_graph();
-        add_node(&mut graph, "freq", "parameter").unwrap();
-        add_node(&mut graph, "osc", "sine").unwrap();
+        add_node(&mut graph, "freq", "parameter", None).unwrap();
+        add_node(&mut graph, "osc", "sine", None).unwrap();
         let (from_port, to_port, variadic) =
             auto_pair_ports(&catalog, &graph, "freq", "osc").expect("pair");
         assert_eq!(from_port, "value");
@@ -573,9 +650,9 @@ mod tests {
     #[test]
     fn remove_edges_at_port_clears_output_or_input() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "sine").unwrap();
-        add_node(&mut graph, "c", "sine").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "sine", None).unwrap();
+        add_node(&mut graph, "c", "sine", None).unwrap();
         add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
         add_edge(&mut graph, "a", "value", "c", "frequency", false).unwrap();
         assert_eq!(remove_edges_at_port(&mut graph, "a", "value", true), 2);
@@ -588,8 +665,8 @@ mod tests {
     #[test]
     fn remove_edges_between_clears_pair() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "sine").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "sine", None).unwrap();
         add_edge(&mut graph, "a", "value", "b", "frequency", false).unwrap();
         add_edge(&mut graph, "a", "value", "b", "time", false).unwrap();
         assert_eq!(remove_edges_between(&mut graph, "a", "b"), 2);
@@ -599,9 +676,9 @@ mod tests {
     #[test]
     fn add_edge_assigns_variadic_order() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "parameter").unwrap();
-        add_node(&mut graph, "mix", "add").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "parameter", None).unwrap();
+        add_node(&mut graph, "mix", "add", None).unwrap();
         let first = add_edge(&mut graph, "a", "value", "mix", "inputs", true).unwrap();
         let second = add_edge(&mut graph, "b", "value", "mix", "inputs", true).unwrap();
         assert_eq!(graph.edges.get(&first).unwrap().order, Some(0));
@@ -612,9 +689,9 @@ mod tests {
     fn auto_pair_appends_to_variadic() {
         let catalog = stub_catalog();
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "parameter").unwrap();
-        add_node(&mut graph, "mix", "add").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "parameter", None).unwrap();
+        add_node(&mut graph, "mix", "add", None).unwrap();
         let (from_port, to_port, variadic) =
             auto_pair_ports(&catalog, &graph, "a", "mix").expect("first");
         assert_eq!((from_port.as_str(), to_port.as_str(), variadic), ("value", "inputs", true));
@@ -627,8 +704,8 @@ mod tests {
     #[test]
     fn expand_input_slots_adds_dummy() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "mix", "add").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "mix", "add", None).unwrap();
         add_edge(&mut graph, "a", "value", "mix", "inputs", true).unwrap();
         let slots = expand_input_slots(&[variadic("inputs", "Sample")], &graph, "mix");
         assert_eq!(slots.len(), 2);
@@ -649,9 +726,9 @@ mod tests {
     #[test]
     fn reorder_variadic_inputs_rewrites_order() {
         let mut graph = empty_graph();
-        add_node(&mut graph, "a", "parameter").unwrap();
-        add_node(&mut graph, "b", "parameter").unwrap();
-        add_node(&mut graph, "mix", "add").unwrap();
+        add_node(&mut graph, "a", "parameter", None).unwrap();
+        add_node(&mut graph, "b", "parameter", None).unwrap();
+        add_node(&mut graph, "mix", "add", None).unwrap();
         let first = add_edge(&mut graph, "a", "value", "mix", "inputs", true).unwrap();
         let second = add_edge(&mut graph, "b", "value", "mix", "inputs", true).unwrap();
         reorder_variadic_inputs(

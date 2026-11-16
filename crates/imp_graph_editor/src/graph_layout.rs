@@ -38,6 +38,8 @@ pub fn node_size_for(input_count: usize, output_count: usize, precise: bool) -> 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaidOutNode {
     pub id: NodeId,
+    /// Optional display title; canvas shows this when present, else `id`.
+    pub title: Option<String>,
     pub node_type: NodeTypeId,
     /// Top-left corner of the node box in layout space.
     pub position: Point,
@@ -140,13 +142,14 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
         let mut y = MARGIN;
         for id in ids {
             let size = node_sizes.get(id).copied().unwrap_or(NODE_SIZE);
-            let node_type = graph
+            let (title, node_type) = graph
                 .nodes
                 .get(id)
-                .map(|node| node.node_type.clone())
-                .unwrap_or_default();
+                .map(|node| (node.title.clone(), node.node_type.clone()))
+                .unwrap_or_else(|| (None, String::new()));
             laid_out.push(LaidOutNode {
                 id: id.clone(),
+                title,
                 node_type,
                 position: Point::new(x, y),
                 size,
