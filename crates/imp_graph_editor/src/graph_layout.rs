@@ -34,6 +34,21 @@ pub fn node_size_for(input_count: usize, output_count: usize, precise: bool) -> 
     Size::new(PRECISE_NODE_WIDTH, height)
 }
 
+/// Host-resolved display fields for a remote (absent-local) NodeId.
+///
+/// Keys in the remotes map mark the id as non-missing; title/type paint like a
+/// local card when provided.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RemoteNodeDisplay {
+    /// Optional display title; canvas shows this when present, else `id`.
+    pub title: Option<String>,
+    /// Imp (or host) node type id shown as the card subtitle.
+    pub node_type: NodeTypeId,
+}
+
+/// Host-indexed remotes keyed by NodeId (absent from `Graph.nodes`).
+pub type RemoteNodeMap = BTreeMap<NodeId, RemoteNodeDisplay>;
+
 /// A node placed by automatic layout.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LaidOutNode {
@@ -41,8 +56,10 @@ pub struct LaidOutNode {
     /// Optional display title; canvas shows this when present, else `id`.
     pub title: Option<String>,
     pub node_type: NodeTypeId,
-    /// True when this id appears only via edges (no local `Graph.nodes` entry).
+    /// True when this id appears only via edges and is not a known host remote.
     pub missing: bool,
+    /// True when absent from the local map but host-indexed as a resolvable remote.
+    pub remote: bool,
     /// Top-left corner of the node box in layout space.
     pub position: Point,
     /// Rendered box size used for packing and content bounds.
@@ -89,6 +106,17 @@ impl GraphLayout {
 /// fall back to [`NODE_SIZE`]. Same-rank nodes are packed top-to-bottom using
 /// each node's height plus [`V_GAP`].
 pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> GraphLayout {
+    layout_graph_with_remotes(graph, node_sizes, &BTreeMap::new())
+}
+
+/// Like [`layout_graph`], treating `remotes` keys as host-ok (not red missing).
+///
+/// Display title/type come from the map entry (same presentation as local cards).
+pub fn layout_graph_with_remotes(
+    graph: &Graph,
+    node_sizes: &BTreeMap<NodeId, Size>,
+    remotes: &RemoteNodeMap,
+) -> GraphLayout {
     let mut digraph: DiGraph<NodeId, ()> = DiGraph::new();
     let mut index_by_id: BTreeMap<NodeId, NodeIndex> = BTreeMap::new();
 
@@ -144,17 +172,28 @@ pub fn layout_graph(graph: &Graph, node_sizes: &BTreeMap<NodeId, Size>) -> Graph
         let mut y = MARGIN;
         for id in ids {
             let size = node_sizes.get(id).copied().unwrap_or(NODE_SIZE);
-            let missing = !graph.nodes.contains_key(id);
+            let present = graph.nodes.contains_key(id);
+            let remote_display = if present {
+                None
+            } else {
+                remotes.get(id)
+            };
+            let remote = remote_display.is_some();
+            let missing = !present && !remote;
             let (title, node_type) = graph
                 .nodes
                 .get(id)
                 .map(|node| (node.title.clone(), node.node_type.clone()))
+                .or_else(|| {
+                    remote_display.map(|display| (display.title.clone(), display.node_type.clone()))
+                })
                 .unwrap_or_else(|| (None, String::new()));
             laid_out.push(LaidOutNode {
                 id: id.clone(),
                 title,
                 node_type,
                 missing,
+                remote,
                 position: Point::new(x, y),
                 size,
             });
@@ -436,6 +475,7 @@ mod tests {
             .find(|n| n.id == "ghost")
             .expect("ghost card");
         assert!(ghost.missing);
+        assert!(!ghost.remote);
         assert!(ghost.node_type.is_empty());
         let present = layout
             .nodes
@@ -447,5 +487,23 @@ mod tests {
             .edges
             .iter()
             .any(|(from, to)| from == "ghost" && to == "present"));
+
+        let remotes = BTreeMap::from([(
+            String::from("ghost"),
+            RemoteNodeDisplay {
+                title: Some("Clock".into()),
+                node_type: "time".into(),
+            },
+        )]);
+        let remote_layout = layout_graph_with_remotes(&graph, &empty_sizes(), &remotes);
+        let remote_ghost = remote_layout
+            .nodes
+            .iter()
+            .find(|n| n.id == "ghost")
+            .expect("remote ghost");
+        assert!(!remote_ghost.missing);
+        assert!(remote_ghost.remote);
+        assert_eq!(remote_ghost.title.as_deref(), Some("Clock"));
+        assert_eq!(remote_ghost.node_type, "time");
     }
 }

@@ -11,7 +11,8 @@ use iced::{Color, Element, Fill, Font, Pixels, Point, Rectangle, Renderer, Size,
 
 use crate::graph_edit::{expand_input_slots, CatalogPort, InputSlot};
 use crate::graph_layout::{
-    layout_graph, node_size_for, GraphLayout, NODE_HEADER_HEIGHT, PORT_SPACING,
+    layout_graph_with_remotes, node_size_for, GraphLayout, RemoteNodeMap, NODE_HEADER_HEIGHT,
+    PORT_SPACING,
 };
 use crate::graph_ui::{ConnectionMode, GraphUiState};
 use imp_core_types::{EdgeId, Graph, NodeId};
@@ -203,6 +204,17 @@ impl GraphView {
         ui: &GraphUiState,
         ports: PortCatalog,
     ) -> Self {
+        Self::new_with_remotes(document_key, graph, ui, ports, &BTreeMap::new())
+    }
+
+    /// Like [`Self::new`], marking host-indexed remotes as non-missing cards.
+    pub fn new_with_remotes(
+        document_key: u64,
+        graph: &Graph,
+        ui: &GraphUiState,
+        ports: PortCatalog,
+        remotes: &RemoteNodeMap,
+    ) -> Self {
         let edges = graph
             .edges
             .iter()
@@ -241,7 +253,7 @@ impl GraphView {
             })
             .collect();
         Self {
-            layout: layout_graph(graph, &node_sizes),
+            layout: layout_graph_with_remotes(graph, &node_sizes, remotes),
             document_key,
             connection_mode: ui.connection_mode,
             selected_node: ui.selected_node.clone(),
@@ -687,10 +699,30 @@ pub fn graph_canvas<'a, Message>(
 where
     Message: 'a + Clone + From<GraphEdit>,
 {
-    Canvas::new(GraphView::new(document_key, graph, ui, ports))
-        .width(Fill)
-        .height(Fill)
-        .into()
+    graph_canvas_with_remotes(document_key, graph, ui, ports, &BTreeMap::new())
+}
+
+/// Like [`graph_canvas`], with host-indexed remotes shown as non-missing cards.
+pub fn graph_canvas_with_remotes<'a, Message>(
+    document_key: u64,
+    graph: &'a Graph,
+    ui: &'a GraphUiState,
+    ports: PortCatalog,
+    remotes: &RemoteNodeMap,
+) -> Element<'a, Message>
+where
+    Message: 'a + Clone + From<GraphEdit>,
+{
+    Canvas::new(GraphView::new_with_remotes(
+        document_key,
+        graph,
+        ui,
+        ports,
+        remotes,
+    ))
+    .width(Fill)
+    .height(Fill)
+    .into()
 }
 
 impl<Message> canvas::Program<Message> for GraphView

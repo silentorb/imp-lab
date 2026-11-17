@@ -23,11 +23,12 @@ pub use graph_edit::{
     InputSlot, NodeTypeCatalog,
 };
 pub use graph_layout::{
-    layout_graph, node_size_for, GraphLayout, LaidOutNode, NODE_HEADER_HEIGHT, NODE_SIZE,
-    PORT_SPACING, PRECISE_NODE_WIDTH, V_GAP,
+    layout_graph, layout_graph_with_remotes, node_size_for, GraphLayout, LaidOutNode,
+    RemoteNodeDisplay, RemoteNodeMap, NODE_HEADER_HEIGHT, NODE_SIZE, PORT_SPACING,
+    PRECISE_NODE_WIDTH, V_GAP,
 };
 pub use graph_ui::{ConnectDraft, ConnectionMode, GraphUiEntry, GraphUiState};
 pub use graph_view::{
-    center_translation, clamp_scale, graph_canvas, pan_by, zoom_at_point, GraphEdit, GraphView,
-    NodePortInfo, PortCatalog, ViewState,
+    center_translation, clamp_scale, graph_canvas, graph_canvas_with_remotes, pan_by, zoom_at_point,
+    GraphEdit, GraphView, NodePortInfo, PortCatalog, ViewState,
 };
