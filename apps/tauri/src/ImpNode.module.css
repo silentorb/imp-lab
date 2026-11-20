@@ -1,0 +1,50 @@
+.node {
+  min-width: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+  font-size: 12px;
+  box-shadow: var(--mantine-shadow-xs);
+}
+
+.header {
+  font-weight: 600;
+  margin-bottom: 6px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ports {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  min-height: 8px;
+}
+
+.inputs,
+.outputs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outputs {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.portRow {
+  line-height: 1.2;
+  color: var(--mantine-color-dimmed);
+  padding-inline: 4px;
+}
+
+.handle {
+  width: 8px;
+  height: 8px;
+  background: var(--mantine-color-blue-6);
+  border: 1px solid var(--mantine-color-body);
+}
