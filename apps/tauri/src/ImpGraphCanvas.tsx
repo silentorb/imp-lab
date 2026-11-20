@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Text, useMantineColorScheme } from "@mantine/core";
 import {
   Background,
@@ -13,12 +13,9 @@ import { impToReactFlow } from "imp-graph-view";
 import "@xyflow/react/dist/style.css";
 import classes from "./ImpGraphCanvas.module.css";
 import { ImpNode, type ImpFlowNode } from "./ImpNode";
+import { estimateNodeSize, layoutGraph } from "./layoutGraph";
 import { resolvePorts } from "./ports";
 import { labRegistry } from "./registry";
-
-const GRID_COLS = 4;
-const CELL_W = 240;
-const CELL_H = 140;
 
 const nodeTypes = { imp: ImpNode } satisfies NodeTypes;
 
@@ -26,12 +23,21 @@ type ImpGraphCanvasProps = {
   graph: Graph;
 };
 
-/** Host-only grid so Imp→RF default `{0,0}` positions do not stack. */
-function toHostNodes(
+type PreparedNode = {
+  id: string;
+  impType: string;
+  inputValues: InputValues;
+  inputPorts: string[];
+  outputPorts: string[];
+};
+
+function prepareHostNodes(
+  graph: Graph,
   convertedNodes: ReturnType<typeof impToReactFlow>["nodes"],
   edges: Edge[],
-): ImpFlowNode[] {
-  return convertedNodes.map((node, index) => {
+): { prepared: PreparedNode[]; sizes: Map<string, { width: number; height: number }> } {
+  const sizes = new Map<string, { width: number; height: number }>();
+  const prepared = convertedNodes.map((node) => {
     const impType = node.type ?? "";
     const inputValues = (node.data?.inputValues ?? {}) as InputValues;
     const { inputPorts, outputPorts } = resolvePorts(
@@ -40,36 +46,84 @@ function toHostNodes(
       node.id,
       edges,
     );
+    sizes.set(node.id, estimateNodeSize(inputPorts.length, outputPorts.length));
     return {
       id: node.id,
-      type: "imp",
-      position: {
-        x: (index % GRID_COLS) * CELL_W,
-        y: Math.floor(index / GRID_COLS) * CELL_H,
-      },
-      data: {
-        impType,
-        inputValues,
-        inputPorts,
-        outputPorts,
-      },
+      impType,
+      inputValues,
+      inputPorts,
+      outputPorts,
     };
   });
+  // Ensure size keys exist for every Imp node even if converter omitted one.
+  for (const id of Object.keys(graph.nodes)) {
+    if (!sizes.has(id)) {
+      sizes.set(id, estimateNodeSize(1, 1));
+    }
+  }
+  return { prepared, sizes };
 }
 
 function ImpGraphCanvasInner({ graph }: ImpGraphCanvasProps) {
   const { colorScheme } = useMantineColorScheme();
-  const { nodes, edges } = useMemo(() => {
+  const edges = useMemo(() => {
+    return impToReactFlow(graph).edges as Edge[];
+  }, [graph]);
+
+  const [nodes, setNodes] = useState<ImpFlowNode[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
     const converted = impToReactFlow(graph);
     const rfEdges = converted.edges as Edge[];
-    return {
-      nodes: toHostNodes(converted.nodes, rfEdges),
-      edges: rfEdges,
+
+    if (converted.nodes.length === 0) {
+      setNodes([]);
+      return;
+    }
+
+    setNodes(null);
+    const { prepared, sizes } = prepareHostNodes(
+      graph,
+      converted.nodes,
+      rfEdges,
+    );
+
+    void layoutGraph(graph, sizes).then((laid) => {
+      if (cancelled) {
+        return;
+      }
+      setNodes(
+        prepared.map((node) => {
+          const box = laid.get(node.id) ?? {
+            x: 0,
+            y: 0,
+            ...estimateNodeSize(node.inputPorts.length, node.outputPorts.length),
+          };
+          return {
+            id: node.id,
+            type: "imp" as const,
+            position: { x: box.x, y: box.y },
+            style: { width: box.width, height: box.height },
+            data: {
+              impType: node.impType,
+              inputValues: node.inputValues,
+              inputPorts: node.inputPorts,
+              outputPorts: node.outputPorts,
+            },
+          };
+        }),
+      );
+    });
+
+    return () => {
+      cancelled = true;
     };
   }, [graph]);
 
-  const empty = nodes.length === 0;
+  const empty = Object.keys(graph.nodes).length === 0;
   const rfColorMode = colorScheme === "light" ? "light" : "dark";
+  const waiting = !empty && nodes === null;
 
   return (
     <div className={classes.root}>
@@ -79,10 +133,16 @@ function ImpGraphCanvasInner({ graph }: ImpGraphCanvasProps) {
             Empty Imp graph
           </Text>
         </div>
+      ) : waiting ? (
+        <div className={classes.empty}>
+          <Text size="sm" c="dimmed" ta="center">
+            Laying out graph…
+          </Text>
+        </div>
       ) : (
         <ReactFlow
           className={classes.flow}
-          nodes={nodes}
+          nodes={nodes ?? []}
           edges={edges}
           nodeTypes={nodeTypes}
           colorMode={rfColorMode}

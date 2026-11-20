@@ -17,7 +17,7 @@ This repo must not depend on Aura (`aura_*`) crates. Product hosts compose lab c
 | --- | --- | --- |
 | `crates/imp_documents/` | Backend | Multi-document session store with host-defined payloads |
 | `crates/imp_graph_editor/` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, layout, edit helpers, chrome widgets) |
-| `apps/tauri/` | Frontend (Tauri) | Experimental Imp desktop shell; Open File bridged; Imp graphs view-only via [imp-graph-view](https://github.com/silentorb/imp-graph-view) with registry-backed (imp.core) + edge-inferred port handles; Aura catalogs not loaded; edit/save deferred |
+| `apps/tauri/` | Frontend (Tauri) | Experimental Imp desktop shell; Open File bridged; Imp graphs view-only via [imp-graph-view](https://github.com/silentorb/imp-graph-view) with registry-backed (imp.core) + edge-inferred port handles and host ELK layered LR auto-layout; Aura catalogs not loaded; edit/save deferred |
 
 ## Commands
 

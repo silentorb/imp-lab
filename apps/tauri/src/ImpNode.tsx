@@ -25,7 +25,7 @@ function ImpNodeComponent({ data }: NodeProps<ImpFlowNode>) {
   return (
     <div
       className={classes.node}
-      style={{ minHeight: 36 + rows * 18 }}
+      style={{ minHeight: 36 + rows * 18, height: "100%", boxSizing: "border-box" }}
     >
       <div className={classes.header} title={data.impType}>
         {data.impType || "(unknown)"}

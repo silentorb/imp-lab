@@ -12,6 +12,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "bun test src/layoutGraph.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@xyflow/react": "^12.8.2",
+    "elkjs": "^0.12.1",
     "imp-core-types": "workspace:*",
     "imp-graph-view": "workspace:*",
     "imp-registry": "workspace:*",
