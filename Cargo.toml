@@ -3,6 +3,12 @@ resolver = "2"
 members = [
     "crates/imp_documents",
     "crates/imp_graph_editor",
+    "apps/tauri/src-tauri",
+]
+# Iced crates (default) must not require WebKit/GTK from the Tauri host.
+default-members = [
+    "crates/imp_documents",
+    "crates/imp_graph_editor",
 ]
 
 [workspace.package]
