@@ -53,7 +53,8 @@ pub fn run() {
             save::pick_and_save_document,
             extensions::get_extensions_load,
             extensions::load_extensions_file,
-            extensions::run_extension_command
+            extensions::run_extension_command,
+            extensions::get_playback_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

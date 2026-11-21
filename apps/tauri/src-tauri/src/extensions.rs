@@ -3,6 +3,7 @@
 use imp_lab_extensions::{
     load_extensions_default, load_extensions_from_path, ExtensionsLoadResult, ExtensionsRuntime,
 };
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -38,6 +39,25 @@ pub fn run_extension_command(
             neighbor_path.as_deref(),
         )
         .map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackStatusDto {
+    pub playing: bool,
+    pub position_secs: f64,
+}
+
+/// Query the Aura Lab playback service clock (when the pack is loaded).
+#[tauri::command]
+pub fn get_playback_status() -> Result<PlaybackStatusDto, String> {
+    let (playing, position_secs) = cached_runtime()
+        .playback_status("playback")
+        .map_err(|e| e.to_string())?;
+    Ok(PlaybackStatusDto {
+        playing,
+        position_secs,
+    })
 }
 
 /// Ensure extensions are loaded (call during app setup before building menus).

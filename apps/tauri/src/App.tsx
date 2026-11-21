@@ -35,11 +35,16 @@ import {
 import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
   CMD_DOCUMENT_NEW_GRAPH,
+  CMD_DOCUMENT_NEW_NOTATION,
   CMD_DOCUMENT_OPEN_FILE,
   CMD_DOCUMENT_SAVE,
   CMD_DOCUMENT_SAVE_AS,
   CMD_EDIT_REDO,
   CMD_EDIT_UNDO,
+  CMD_NOTATION_SNAP_TOGGLE,
+  CMD_NOTATION_TOOL_DRAW,
+  CMD_NOTATION_TOOL_ERASE,
+  CMD_NOTATION_TOOL_SELECT,
   CMD_PLAY_TOGGLE,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
@@ -65,6 +70,24 @@ import {
 } from "./documents";
 import { GraphErrorBoundary } from "./GraphErrorBoundary";
 import { LabGraphPanel } from "./LabGraphPanel";
+import {
+  canRedoNotation,
+  canUndoNotation,
+  createNotationHistory,
+  emptyNotation,
+  isNotationDirty,
+  markNotationSaved,
+  notationFromUnknown,
+  PianoRollPanel,
+  pushNotation,
+  redoNotation,
+  secondsToBeats,
+  summarizeNotation,
+  undoNotation,
+  type Notation,
+  type NotationHistory,
+  type PianoRollUiPrefs,
+} from "./piano-roll";
 import { getLabRegistry } from "./registry";
 import classes from "./App.module.css";
 
@@ -112,9 +135,24 @@ function documentDirty(history: GraphHistory, origin: string): boolean {
   return isDirty(history) || isUntitledOrigin(origin);
 }
 
+function notationDocDirty(history: NotationHistory, origin: string): boolean {
+  return isNotationDirty(history) || isUntitledOrigin(origin);
+}
+
 type SaveResult = {
   origin: string;
   title: string;
+};
+
+type PlaybackStatusDto = {
+  playing: boolean;
+  positionSecs: number;
+};
+
+const DEFAULT_PIANO_PREFS: PianoRollUiPrefs = {
+  tool: "draw",
+  snapEnabled: true,
+  snapResolution: "1/16",
 };
 
 export default function App() {
@@ -124,16 +162,32 @@ export default function App() {
   const [histories, setHistories] = useState<Record<string, GraphHistory>>(
     {},
   );
+  const [notationHistories, setNotationHistories] = useState<
+    Record<string, NotationHistory>
+  >({});
+  const [playheads, setPlayheads] = useState<Record<string, number>>({});
+  const [pianoPrefs, setPianoPrefs] =
+    useState<PianoRollUiPrefs>(DEFAULT_PIANO_PREFS);
+  const [notationPlayingId, setNotationPlayingId] = useState<string | null>(
+    null,
+  );
+  const [livePlayheadBeats, setLivePlayheadBeats] = useState<number | null>(
+    null,
+  );
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
   const historiesRef = useRef(histories);
   historiesRef.current = histories;
+  const notationHistoriesRef = useRef(notationHistories);
+  notationHistoriesRef.current = notationHistories;
+  const playheadsRef = useRef(playheads);
+  playheadsRef.current = playheads;
   const [activeId, setActiveId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const titleCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState(
-    "Prototype · Open / Save bridged · Imp graphs editable",
+    "Prototype · Open / Save bridged · Imp graphs + notation",
   );
   const [registry, setRegistry] = useState<Registry>(() => getLabRegistry());
   const [extensionCommandIds, setExtensionCommandIds] = useState<Set<string>>(
@@ -253,6 +307,26 @@ export default function App() {
     [],
   );
 
+  const syncNotationFromHistory = useCallback(
+    (docId: string, history: NotationHistory) => {
+      setNotationHistories((prev) => ({ ...prev, [docId]: history }));
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.id === docId
+            ? {
+                ...doc,
+                notation: history.present,
+                dirty: notationDocDirty(history, doc.origin),
+                summary: summarizeNotation(history.present),
+                title: history.present.title ?? doc.title,
+              }
+            : doc,
+        ),
+      );
+    },
+    [],
+  );
+
   const updateDocGraph = useCallback(
     (docId: string, graph: Graph, coalesceKey?: string) => {
       const baseline =
@@ -262,6 +336,21 @@ export default function App() {
       syncDocFromHistory(docId, push(current, graph, coalesceKey));
     },
     [syncDocFromHistory],
+  );
+
+  const updateDocNotation = useCallback(
+    (docId: string, notation: Notation, coalesceKey?: string) => {
+      const baseline =
+        documentsRef.current.find((d) => d.id === docId)?.notation ??
+        emptyNotation(docId);
+      const current =
+        notationHistoriesRef.current[docId] ?? createNotationHistory(baseline);
+      syncNotationFromHistory(
+        docId,
+        pushNotation(current, notation, coalesceKey),
+      );
+    },
+    [syncNotationFromHistory],
   );
 
   const clearTitleCommitTimer = useCallback(() => {
@@ -374,13 +463,26 @@ export default function App() {
         setStatus(`Activated · ${existing.title}`);
         return;
       }
-      setDocuments((prev) => [...prev, doc]);
-      setHistories((prev) => ({
-        ...prev,
-        [doc.id]: createHistory(doc.graph ?? emptyImpGraph()),
-      }));
-      setActiveId(doc.id);
-      setStatus(`Opened · ${doc.title}`);
+      let opened = doc;
+      if (doc.kind === "notation") {
+        const parsed = notationFromUnknown(
+          doc.notation ?? emptyNotation(doc.id),
+        );
+        opened = { ...doc, notation: parsed, summary: summarizeNotation(parsed) };
+        setNotationHistories((prev) => ({
+          ...prev,
+          [opened.id]: createNotationHistory(parsed),
+        }));
+        setPlayheads((prev) => ({ ...prev, [opened.id]: 0 }));
+      } else {
+        setHistories((prev) => ({
+          ...prev,
+          [doc.id]: createHistory(doc.graph ?? emptyImpGraph()),
+        }));
+      }
+      setDocuments((prev) => [...prev, opened]);
+      setActiveId(opened.id);
+      setStatus(`Opened · ${opened.title}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setStatus(`Open failed · ${message}`);
@@ -395,6 +497,21 @@ export default function App() {
       }
       const { [docId]: _removed, ...rest } = prev;
       return { ...rest, [result.origin]: markSaved(current) };
+    });
+    setNotationHistories((prev) => {
+      const current = prev[docId];
+      if (!current) {
+        return prev;
+      }
+      const { [docId]: _removed, ...rest } = prev;
+      return { ...rest, [result.origin]: markNotationSaved(current) };
+    });
+    setPlayheads((prev) => {
+      if (!(docId in prev)) {
+        return prev;
+      }
+      const { [docId]: parked, ...rest } = prev;
+      return { ...rest, [result.origin]: parked ?? 0 };
     });
     setDocuments((prev) =>
       prev.map((d) =>
@@ -422,14 +539,29 @@ export default function App() {
     setStatus(`Saved · ${result.title}`);
   }, []);
 
+  const savePayloadFor = (doc: EditorDocument) => {
+    if (doc.kind === "notation") {
+      return {
+        kind: "notation" as const,
+        notation: doc.notation ?? emptyNotation(doc.id),
+        path: doc.origin,
+      };
+    }
+    return {
+      kind: "imp-graph" as const,
+      graph: doc.graph ?? emptyImpGraph(),
+      path: doc.origin,
+    };
+  };
+
   const saveActive = useCallback(async () => {
     const doc = documents.find((d) => d.id === activeId) ?? documents[0];
-    if (!doc?.graph) {
+    if (!doc || (doc.kind === "imp-graph" && !doc.graph) || (doc.kind === "notation" && !doc.notation)) {
       setStatus("Nothing to save");
       return;
     }
     try {
-      const payload = { graph: doc.graph, path: doc.origin };
+      const payload = savePayloadFor(doc);
       const needsSaveAs =
         !doc.origin ||
         doc.origin === "untitled" ||
@@ -452,12 +584,12 @@ export default function App() {
 
   const saveActiveAs = useCallback(async () => {
     const doc = documents.find((d) => d.id === activeId) ?? documents[0];
-    if (!doc?.graph) {
+    if (!doc || (doc.kind === "imp-graph" && !doc.graph) || (doc.kind === "notation" && !doc.notation)) {
       setStatus("Nothing to save");
       return;
     }
     try {
-      const payload = { graph: doc.graph, path: doc.origin };
+      const payload = savePayloadFor(doc);
       const result = await invoke<SaveResult | null>("pick_and_save_document", {
         payload,
       });
@@ -489,6 +621,20 @@ export default function App() {
           const { [currentId]: _removed, ...rest } = h;
           return rest;
         });
+        setNotationHistories((h) => {
+          if (!currentId || !(currentId in h)) {
+            return h;
+          }
+          const { [currentId]: _removed, ...rest } = h;
+          return rest;
+        });
+        setPlayheads((h) => {
+          if (!currentId || !(currentId in h)) {
+            return h;
+          }
+          const { [currentId]: _removed, ...rest } = h;
+          return rest;
+        });
         setActiveId(nextActive);
         setStatus(next.length ? "Closed tab" : "Closed last tab");
       });
@@ -506,6 +652,16 @@ export default function App() {
       setStatus("Nothing to undo");
       return;
     }
+    if (doc.kind === "notation") {
+      const history = notationHistories[doc.id];
+      if (!history || !canUndoNotation(history)) {
+        setStatus("Nothing to undo");
+        return;
+      }
+      syncNotationFromHistory(doc.id, undoNotation(history));
+      setStatus("Undo");
+      return;
+    }
     const history = histories[doc.id];
     if (!history || !canUndo(history)) {
       setStatus("Nothing to undo");
@@ -514,7 +670,14 @@ export default function App() {
     const next = undo(history);
     syncDocFromHistory(doc.id, next);
     setStatus("Undo");
-  }, [activeId, documents, histories, syncDocFromHistory]);
+  }, [
+    activeId,
+    documents,
+    histories,
+    notationHistories,
+    syncDocFromHistory,
+    syncNotationFromHistory,
+  ]);
 
   const redoActive = useCallback(() => {
     if (isTextEditingTarget(document.activeElement)) {
@@ -526,6 +689,16 @@ export default function App() {
       setStatus("Nothing to redo");
       return;
     }
+    if (doc.kind === "notation") {
+      const history = notationHistories[doc.id];
+      if (!history || !canRedoNotation(history)) {
+        setStatus("Nothing to redo");
+        return;
+      }
+      syncNotationFromHistory(doc.id, redoNotation(history));
+      setStatus("Redo");
+      return;
+    }
     const history = histories[doc.id];
     if (!history || !canRedo(history)) {
       setStatus("Nothing to redo");
@@ -534,12 +707,19 @@ export default function App() {
     const next = redo(history);
     syncDocFromHistory(doc.id, next);
     setStatus("Redo");
-  }, [activeId, documents, histories, syncDocFromHistory]);
+  }, [
+    activeId,
+    documents,
+    histories,
+    notationHistories,
+    syncDocFromHistory,
+    syncNotationFromHistory,
+  ]);
 
   const addNodeToActive = useCallback(
     (typeId: string) => {
       const doc = documents.find((d) => d.id === activeId) ?? documents[0];
-      if (!doc) {
+      if (!doc || doc.kind !== "imp-graph") {
         setStatus("Open or create a graph first");
         return;
       }
@@ -554,24 +734,68 @@ export default function App() {
     async (id: string) => {
       const docs = documentsRef.current;
       const doc = docs.find((d) => d.id === activeId) ?? docs[0];
-      const graph = doc?.graph;
-      if (!graph && (id === "play.start" || id === "play.toggle")) {
-        setStatus("Open or create a graph before playing");
-        return;
-      }
       const neighborPath =
         doc && !isUntitledOrigin(doc.origin) ? doc.origin : null;
+
+      let graphJson: string | null = null;
+      if (doc?.kind === "notation" && doc.notation) {
+        if (id === "play.start" || id === "play.toggle" || id === "play.stop") {
+          const parked = playheadsRef.current[doc.id] ?? 0;
+          graphJson = JSON.stringify({
+            ...doc.notation,
+            labStartBeats: parked,
+          });
+        }
+      } else if (doc?.graph) {
+        graphJson = JSON.stringify(doc.graph);
+      }
+
+      if (
+        !graphJson &&
+        (id === "play.start" || id === "play.toggle")
+      ) {
+        setStatus("Open a graph or notation document before playing");
+        return;
+      }
+
       try {
         await invoke("run_extension_command", {
           id,
-          graphJson: graph ? JSON.stringify(graph) : null,
+          graphJson,
           neighborPath,
         });
         if (id === "play.stop") {
+          setNotationPlayingId(null);
+          setLivePlayheadBeats(null);
           setStatus("Playback stopped");
         } else if (id === "play.start") {
+          if (doc?.kind === "notation") {
+            setNotationPlayingId(doc.id);
+          } else {
+            setNotationPlayingId(null);
+            setLivePlayheadBeats(null);
+          }
           setStatus("Playback started");
         } else if (id === "play.toggle") {
+          try {
+            const status = await invoke<PlaybackStatusDto>(
+              "get_playback_status",
+            );
+            // Status is post-toggle: playing means we just started.
+            if (status.playing && doc?.kind === "notation") {
+              setNotationPlayingId(doc.id);
+            } else {
+              setNotationPlayingId(null);
+              setLivePlayheadBeats(null);
+            }
+          } catch {
+            if (doc?.kind === "notation") {
+              setNotationPlayingId(doc.id);
+            } else {
+              setNotationPlayingId(null);
+              setLivePlayheadBeats(null);
+            }
+          }
           setStatus("Playback toggled");
         } else {
           setStatus(`Ran · ${id}`);
@@ -607,6 +831,20 @@ export default function App() {
           setStatus(`New graph · ${doc.title}`);
           break;
         }
+        case CMD_DOCUMENT_NEW_NOTATION: {
+          const doc = newUntitledDocument("notation");
+          setDocuments((prev) => [...prev, doc]);
+          setNotationHistories((prev) => ({
+            ...prev,
+            [doc.id]: createNotationHistory(
+              doc.notation ?? emptyNotation(doc.id),
+            ),
+          }));
+          setPlayheads((prev) => ({ ...prev, [doc.id]: 0 }));
+          setActiveId(doc.id);
+          setStatus(`New notation · ${doc.title}`);
+          break;
+        }
         case CMD_DOCUMENT_CLOSE_ACTIVE:
           closeActive();
           break;
@@ -618,6 +856,25 @@ export default function App() {
           break;
         case CMD_VIEW_TOGGLE_COLOR_SCHEME:
           toggleColorScheme();
+          break;
+        case CMD_NOTATION_TOOL_DRAW:
+          setPianoPrefs((p) => ({ ...p, tool: "draw" }));
+          setStatus("Tool · Draw");
+          break;
+        case CMD_NOTATION_TOOL_SELECT:
+          setPianoPrefs((p) => ({ ...p, tool: "select" }));
+          setStatus("Tool · Select");
+          break;
+        case CMD_NOTATION_TOOL_ERASE:
+          setPianoPrefs((p) => ({ ...p, tool: "erase" }));
+          setStatus("Tool · Erase");
+          break;
+        case CMD_NOTATION_SNAP_TOGGLE:
+          setPianoPrefs((p) => {
+            const snapEnabled = !p.snapEnabled;
+            setStatus(snapEnabled ? "Snap on" : "Snap off");
+            return { ...p, snapEnabled };
+          });
           break;
         default:
           if (extensionCommandIdsRef.current.has(id)) {
@@ -664,24 +921,81 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== "Space" && event.key !== " ") {
+      if (isTextEditingTarget(document.activeElement)) {
+        return;
+      }
+      if (event.code === "Space" || event.key === " ") {
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+          return;
+        }
+        if (!extensionCommandIdsRef.current.has(CMD_PLAY_TOGGLE)) {
+          return;
+        }
+        event.preventDefault();
+        dispatchCommand(CMD_PLAY_TOGGLE);
         return;
       }
       if (event.ctrlKey || event.metaKey || event.altKey) {
         return;
       }
-      if (isTextEditingTarget(document.activeElement)) {
-        return;
+      const key = event.key.toLowerCase();
+      if (key === "d") {
+        event.preventDefault();
+        dispatchCommand(CMD_NOTATION_TOOL_DRAW);
+      } else if (key === "s") {
+        event.preventDefault();
+        dispatchCommand(CMD_NOTATION_TOOL_SELECT);
+      } else if (key === "e") {
+        event.preventDefault();
+        dispatchCommand(CMD_NOTATION_TOOL_ERASE);
+      } else if (key === "n") {
+        event.preventDefault();
+        dispatchCommand(CMD_NOTATION_SNAP_TOGGLE);
       }
-      if (!extensionCommandIdsRef.current.has(CMD_PLAY_TOGGLE)) {
-        return;
-      }
-      event.preventDefault();
-      dispatchCommand(CMD_PLAY_TOGGLE);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [dispatchCommand]);
+
+  // Notation playhead follows the Lab playback clock; snaps back when stopped.
+  useEffect(() => {
+    if (!notationPlayingId) {
+      setLivePlayheadBeats(null);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const status = await invoke<PlaybackStatusDto>("get_playback_status");
+        if (cancelled) {
+          return;
+        }
+        const doc = documentsRef.current.find(
+          (d) => d.id === notationPlayingId,
+        );
+        if (!doc?.notation) {
+          return;
+        }
+        if (!status.playing) {
+          setNotationPlayingId(null);
+          setLivePlayheadBeats(null);
+          return;
+        }
+        setLivePlayheadBeats(
+          secondsToBeats(status.positionSecs, doc.notation.tempoBpm),
+        );
+      } catch {
+        // Pack may be absent; ignore tick errors.
+      }
+    };
+    const handle = window.setInterval(() => {
+      void tick();
+    }, 33);
+    return () => {
+      cancelled = true;
+      window.clearInterval(handle);
+    };
+  }, [notationPlayingId]);
 
   return (
     <AppShell
@@ -731,24 +1045,49 @@ export default function App() {
 
       <AppShell.Aside className={classes.aside} p="sm">
         <Stack gap="xs">
-          <Title order={6}>Add node</Title>
-          <Group gap={6}>
-            {paletteTypes.map((typeId) => (
-              <Button
-                key={typeId}
-                size="compact-xs"
-                variant="light"
-                onClick={() => addNodeToActive(typeId)}
-              >
-                {typeId}
-              </Button>
-            ))}
-          </Group>
+          {active?.kind !== "notation" ? (
+            <>
+              <Title order={6}>Add node</Title>
+              <Group gap={6}>
+                {paletteTypes.map((typeId) => (
+                  <Button
+                    key={typeId}
+                    size="compact-xs"
+                    variant="light"
+                    onClick={() => addNodeToActive(typeId)}
+                  >
+                    {typeId}
+                  </Button>
+                ))}
+              </Group>
+            </>
+          ) : null}
           <Title order={6}>Properties</Title>
           {!active ? (
             <Text size="xs" c="dimmed">
               No document
             </Text>
+          ) : active.kind === "notation" ? (
+            <Stack gap={4}>
+              <Text size="xs" c="dimmed">
+                No graph selection
+              </Text>
+              {active.properties.map((row) => (
+                <Group
+                  key={row.label}
+                  gap="xs"
+                  justify="space-between"
+                  wrap="nowrap"
+                >
+                  <Text size="xs" c="dimmed">
+                    {row.label}
+                  </Text>
+                  <Text size="xs" ta="right" lineClamp={1}>
+                    {row.value}
+                  </Text>
+                </Group>
+              ))}
+            </Stack>
           ) : selectedLocalNode ? (
             <Stack gap={6}>
               <TextInput
@@ -898,7 +1237,7 @@ export default function App() {
                 No documents open
               </Text>
               <Text size="xs" c="dimmed" ta="center">
-                File → Open File… or New graph
+                File → Open File…, New graph, or New notation
               </Text>
             </Stack>
           </Box>
@@ -932,19 +1271,44 @@ export default function App() {
                   </Title>
                   <Text size="sm">{doc.summary}</Text>
                   <Box className={classes.canvas}>
-                    <GraphErrorBoundary resetKey={doc.id}>
-                      <LabGraphPanel
-                        graph={doc.graph ?? emptyImpGraph()}
-                        registry={registry}
-                        fitViewKey={doc.id}
-                        onGraphChange={(graph) => updateDocGraph(doc.id, graph)}
-                        onSelectionChange={
-                          doc.id === (activeId || documents[0]?.id)
-                            ? onGraphSelectionChange
-                            : undefined
+                    {doc.kind === "notation" ? (
+                      <PianoRollPanel
+                        notation={doc.notation ?? emptyNotation(doc.id)}
+                        playheadBeats={
+                          notationPlayingId === doc.id &&
+                          livePlayheadBeats != null
+                            ? livePlayheadBeats
+                            : (playheads[doc.id] ?? 0)
+                        }
+                        prefs={pianoPrefs}
+                        onPrefsChange={setPianoPrefs}
+                        onNotationChange={(notation, coalesceKey) =>
+                          updateDocNotation(doc.id, notation, coalesceKey)
+                        }
+                        onPlayheadChange={(beats) =>
+                          setPlayheads((prev) => ({
+                            ...prev,
+                            [doc.id]: beats,
+                          }))
                         }
                       />
-                    </GraphErrorBoundary>
+                    ) : (
+                      <GraphErrorBoundary resetKey={doc.id}>
+                        <LabGraphPanel
+                          graph={doc.graph ?? emptyImpGraph()}
+                          registry={registry}
+                          fitViewKey={doc.id}
+                          onGraphChange={(graph) =>
+                            updateDocGraph(doc.id, graph)
+                          }
+                          onSelectionChange={
+                            doc.id === (activeId || documents[0]?.id)
+                              ? onGraphSelectionChange
+                              : undefined
+                          }
+                        />
+                      </GraphErrorBoundary>
+                    )}
                   </Box>
                 </Box>
               </Tabs.Panel>

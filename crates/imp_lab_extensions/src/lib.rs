@@ -21,7 +21,7 @@ pub use loader::{
 };
 pub use service::{
     invoke_service_action, menu_contributions_from_config, resolve_command_action,
-    write_service_error, CommandDispatchError, ImpLabServiceV0, MenuItemContribution,
-    RegisteredService, ResolvedCommandAction, ServiceRegistry,
+    service_position_secs, write_service_error, CommandDispatchError, ImpLabServiceV0,
+    MenuItemContribution, RegisteredService, ResolvedCommandAction, ServiceRegistry,
 };
 pub use ts_json::imp_json_to_ts_camel;

@@ -45,6 +45,8 @@ pub struct ImpLabServiceV0 {
     >,
     /// Returns 1 when active, 0 when idle, negative on error.
     pub is_playing: Option<unsafe extern "C" fn(ctx: *mut c_void) -> c_int>,
+    /// Current playback position in seconds (0 when idle). Optional; older services may omit.
+    pub position_secs: Option<unsafe extern "C" fn(ctx: *mut c_void) -> f64>,
 }
 
 // Safety: service vtables are process-lifetime function pointers + opaque ctx owned by the extension.
@@ -100,7 +102,7 @@ pub struct ResolvedCommandAction {
     pub service_component_id: String,
     /// Service implementation id used to look up the registered vtable.
     pub service_implementation_id: String,
-    /// Action name: `start` | `stop` | `toggle` | `is_playing`.
+    /// Action name: `start` | `stop` | `toggle` | `is_playing` | `position`.
     pub action: String,
 }
 
@@ -335,8 +337,24 @@ pub unsafe fn invoke_service_action(
             }
             Ok(Some(code != 0))
         }
+        "position" => {
+            // Position is exposed via `service_position_secs`; this action is reserved.
+            Err(CommandDispatchError::UnsupportedAction(action.into()))
+        }
         other => Err(CommandDispatchError::UnsupportedAction(other.into())),
     }
+}
+
+/// Read playback position in seconds from a service that publishes `position_secs`.
+///
+/// # Safety
+///
+/// `vtable` and its `ctx` must remain valid for the duration of the call.
+pub unsafe fn service_position_secs(vtable: &ImpLabServiceV0) -> Result<f64, CommandDispatchError> {
+    let Some(position_secs) = vtable.position_secs else {
+        return Err(CommandDispatchError::UnsupportedAction("position".into()));
+    };
+    Ok(position_secs(vtable.ctx))
 }
 
 fn read_err(buf: &[u8], code: c_int) -> String {

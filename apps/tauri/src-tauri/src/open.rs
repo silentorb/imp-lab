@@ -28,15 +28,18 @@ pub struct DocumentSummary {
     /// Bare Imp `{ nodes, edges }` for graph docs (`type` tip stripped when present).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub graph: Option<Value>,
+    /// Aura notation tip JSON for notation docs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notation: Option<Value>,
 }
 
-/// Native dialog + classify Imp graph JSON into a document summary (or `None` if cancelled).
+/// Native dialog + classify Imp graph / notation JSON into a document summary.
 #[tauri::command]
 pub fn pick_and_open_document(app: AppHandle) -> Result<Option<DocumentSummary>, String> {
     let picked = app
         .dialog()
         .file()
-        .add_filter("Imp / JSON graphs", &["json"])
+        .add_filter("Imp / Aura JSON", &["json"])
         .blocking_pick_file();
 
     let Some(file_path) = picked else {
@@ -67,6 +70,7 @@ fn open_document_at(path: &Path) -> Result<DocumentSummary, String> {
 
     match doc_type {
         "imp-graph" => summarize_imp_graph(path, &value),
+        "notation" => summarize_notation(path, value),
         "imp-graph-library" => Err(
             "GraphLibrary catalogs cannot be opened as editor documents yet".to_string(),
         ),
@@ -117,6 +121,7 @@ fn summarize_imp_graph(path: &Path, value: &Value) -> Result<DocumentSummary, St
         dirty: false,
         summary: format!("Imp graph · {node_count} nodes · {edge_count} edges"),
         graph: Some(graph),
+        notation: None,
         properties: vec![
             PropertyRow {
                 label: "Type".into(),
@@ -137,6 +142,82 @@ fn summarize_imp_graph(path: &Path, value: &Value) -> Result<DocumentSummary, St
             PropertyRow {
                 label: "Edges".into(),
                 value: edge_count.to_string(),
+            },
+        ],
+    })
+}
+
+fn summarize_notation(path: &Path, value: Value) -> Result<DocumentSummary, String> {
+    let version = value
+        .get("version")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "notation is missing version".to_string())?;
+    if version != 1 {
+        return Err(format!("unsupported notation version {version}"));
+    }
+    let tempo = value
+        .get("tempoBpm")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| "notation is missing tempoBpm".to_string())?;
+    if !tempo.is_finite() || tempo <= 0.0 {
+        return Err("notation tempoBpm must be positive".into());
+    }
+    let _ = value
+        .get("timeSignature")
+        .ok_or_else(|| "notation is missing timeSignature".to_string())?;
+    let event_count = value
+        .get("events")
+        .and_then(Value::as_array)
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    let path_title = title_from_path(path);
+    let title = value
+        .get("title")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&path_title)
+        .to_string();
+    let origin = origin_label(path);
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| origin.clone());
+
+    Ok(DocumentSummary {
+        id,
+        title: title.clone(),
+        kind: "notation".into(),
+        origin: origin.clone(),
+        dirty: false,
+        summary: format!(
+            "Notation · {event_count} note{} · {tempo} BPM",
+            if event_count == 1 { "" } else { "s" }
+        ),
+        graph: None,
+        notation: Some(value),
+        properties: vec![
+            PropertyRow {
+                label: "Type".into(),
+                value: "notation".into(),
+            },
+            PropertyRow {
+                label: "Title".into(),
+                value: title,
+            },
+            PropertyRow {
+                label: "Path".into(),
+                value: origin,
+            },
+            PropertyRow {
+                label: "Events".into(),
+                value: event_count.to_string(),
+            },
+            PropertyRow {
+                label: "Tempo".into(),
+                value: tempo.to_string(),
             },
         ],
     })
@@ -186,13 +267,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_notation() {
+    fn opens_notation() {
         let path = write_temp(
             "notation",
-            r#"{"type":"notation","tempoBpm":120,"events":[]}"#,
+            r#"{"type":"notation","id":"tip1","version":1,"tempoBpm":120,"timeSignature":{"beatsPerBar":4,"beatUnit":4},"events":[{"semitone":60,"startBeats":0,"durationBeats":0.25}]}"#,
         );
-        let err = open_document_at(&path).unwrap_err();
+        let summary = open_document_at(&path).unwrap();
         let _ = fs::remove_file(&path);
-        assert!(err.contains("unsupported document type"));
+        assert_eq!(summary.kind, "notation");
+        assert!(summary.summary.contains("1 note"));
+        let notation = summary.notation.expect("notation body");
+        assert_eq!(notation["type"], "notation");
+        assert_eq!(notation["id"], "tip1");
     }
 }

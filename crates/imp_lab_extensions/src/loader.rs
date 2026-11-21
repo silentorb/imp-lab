@@ -131,6 +131,46 @@ impl ExtensionsRuntime {
         drop(services);
         unsafe { invoke_service_action(&vtable, &resolved.action, graph_json, neighbor_path) }
     }
+
+    /// Playback status for a registered service implementation id (e.g. `playback`).
+    pub fn playback_status(
+        &self,
+        implementation_id: &str,
+    ) -> Result<(bool, f64), CommandDispatchError> {
+        let services = self
+            .services
+            .lock()
+            .map_err(|_| CommandDispatchError::ServiceFailed("service registry poisoned".into()))?;
+        let vtable = services
+            .get(implementation_id)
+            .copied()
+            .ok_or_else(|| {
+                CommandDispatchError::ServiceNotRegistered(implementation_id.to_string())
+            })?;
+        drop(services);
+        let playing = unsafe {
+            match vtable.is_playing {
+                Some(is_playing) => {
+                    let code = is_playing(vtable.ctx);
+                    if code < 0 {
+                        return Err(CommandDispatchError::ServiceFailed(format!(
+                            "is_playing failed ({code})"
+                        )));
+                    }
+                    code != 0
+                }
+                None => {
+                    return Err(CommandDispatchError::UnsupportedAction(
+                        "is_playing".into(),
+                    ))
+                }
+            }
+        };
+        let position = unsafe {
+            crate::service::service_position_secs(&vtable).unwrap_or(0.0)
+        };
+        Ok((playing, position))
+    }
 }
 
 /// Serde-friendly config mirror for the frontend (keeps camelCase).

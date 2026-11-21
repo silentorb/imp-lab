@@ -10,6 +10,7 @@ use tauri::{AppHandle, Runtime};
 
 const CMD_DOCUMENT_OPEN_FILE: &str = "document.open-file";
 const CMD_DOCUMENT_NEW_GRAPH: &str = "document.new.graph";
+const CMD_DOCUMENT_NEW_NOTATION: &str = "document.new.notation";
 const CMD_DOCUMENT_SAVE: &str = "document.save";
 const CMD_DOCUMENT_SAVE_AS: &str = "document.save-as";
 const CMD_DOCUMENT_CLOSE_ACTIVE: &str = "document.close_active";
@@ -22,6 +23,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let file = SubmenuBuilder::new(app, "File")
         .text(CMD_DOCUMENT_OPEN_FILE, "Open File…")
         .text(CMD_DOCUMENT_NEW_GRAPH, "New graph")
+        .text(CMD_DOCUMENT_NEW_NOTATION, "New notation")
         .text(CMD_DOCUMENT_SAVE, "Save")
         .text(CMD_DOCUMENT_SAVE_AS, "Save As…")
         .text(CMD_DOCUMENT_CLOSE_ACTIVE, "Close")
