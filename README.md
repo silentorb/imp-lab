@@ -2,7 +2,7 @@
 
 Crates for **managing scaling networks of Imp graphs**, plus editor/GUI building blocks for working with those graphs. Language-neutral Imp specs live in [imp-spec](https://github.com/silentorb/imp-spec); the Rust Imp core lives in [imp-rs](https://github.com/silentorb/imp-rs).
 
-Product hosts (for example Aura Editor) supply domain chrome, registries, and extensions. This repo must not depend on Aura (`aura_*`) crates.
+Product hosts supply domain chrome, registries, and extensions via Lab’s optional [extensions system](docs/features/extensions.md) (Tome-shaped `extensions.json` + sidecar cdylibs). This repo must not depend on Aura (`aura_*`) crates. The Iced Aura Editor is **deprecated**; prefer Lab Tauri + an Aura Lab pack for audio catalogs.
 
 GUI and non-GUI concerns live in the same repository for now (separate crates / apps). A further split within the repo is fine later; treating lab as “GUI only” is not the intended scope.
 
@@ -18,10 +18,11 @@ GUI and non-GUI concerns live in the same repository for now (separate crates / 
 | Path | Layer | Role |
 | --- | --- | --- |
 | `imp_documents` | Backend | Multi-document session store (tabs, paths, dirty/lifecycle) with host-defined payloads |
+| `imp_lab_extensions` | Backend | Optional Tome-shaped `extensions.json` + dynamic library loading (`imp-catalog`) |
 | `imp_graph_editor` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, edit helpers, chrome widgets) |
-| `apps/tauri` | Frontend (Tauri) | Experimental Imp desktop shell (`imp-lab-tauri`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports + Add + selected-node Title + input literals on-node and in Properties); Edit Undo/Redo for Imp document history; host ELK LR layout; Aura catalogs not loaded; Simple mode deferred |
+| `apps/tauri` | Frontend (Tauri) | Experimental Imp desktop shell (`imp-lab-tauri`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView`; Edit Undo/Redo; host ELK LR layout; optional catalogs via Lab pack; Simple mode deferred |
 
-Iced shell/extension-framework extract from Aura Editor remains future work. The Tauri app is a separate experimental host, not that extract.
+The Tauri host loads optional packs (e.g. Aura audio catalogs) without compile-time Aura deps.
 
 ## Development
 

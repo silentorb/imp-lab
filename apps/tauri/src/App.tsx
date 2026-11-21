@@ -27,7 +27,11 @@ import {
   setNodeTitle,
   type GraphSelection,
 } from "imp-graph-view";
-import { getNodeDefinition, listNodeDefinitions } from "imp-registry";
+import {
+  getNodeDefinition,
+  listNodeDefinitions,
+  type Registry,
+} from "imp-registry";
 import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
   CMD_DOCUMENT_NEW_GRAPH,
@@ -60,8 +64,18 @@ import {
 } from "./documents";
 import { GraphErrorBoundary } from "./GraphErrorBoundary";
 import { LabGraphPanel } from "./LabGraphPanel";
-import { labRegistry } from "./registry";
+import { getLabRegistry } from "./registry";
 import classes from "./App.module.css";
+
+type ExtensionsLoadDto = {
+  warnings?: string[];
+  packRoot?: string | null;
+  catalogs?: {
+    nodeLibraries?: unknown[];
+    typeConstraintLibraries?: unknown[];
+    graphLibraries?: unknown[];
+  };
+};
 
 function summarizeGraph(graph: Graph): string {
   const nodeCount = Object.keys(graph.nodes).length;
@@ -111,13 +125,43 @@ export default function App() {
   const [status, setStatus] = useState(
     "Prototype · Open / Save bridged · Imp graphs editable",
   );
+  const [registry, setRegistry] = useState<Registry>(() => getLabRegistry());
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loaded = await invoke<ExtensionsLoadDto>("get_extensions_load");
+        if (cancelled) {
+          return;
+        }
+        for (const warning of loaded.warnings ?? []) {
+          console.warn("imp-lab extensions:", warning);
+        }
+        setRegistry(getLabRegistry(loaded.catalogs ?? null));
+        const n = loaded.catalogs?.nodeLibraries?.length ?? 0;
+        if (n > 0) {
+          setStatus((prev) =>
+            prev.includes("catalogs")
+              ? prev
+              : `${prev} · ${n} extension catalog libraries`,
+          );
+        }
+      } catch (err) {
+        console.warn("get_extensions_load failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const paletteTypes = useMemo(() => {
     const ids = new Set(
-      listNodeDefinitions(labRegistry).map((definition) => definition.id),
+      listNodeDefinitions(registry).map((definition) => definition.id),
     );
     return [...ids].sort();
-  }, []);
+  }, [registry]);
 
   const active = useMemo(
     () => documents.find((doc) => doc.id === activeId) ?? documents[0],
@@ -140,8 +184,8 @@ export default function App() {
     if (!selectedLocalNode) {
       return undefined;
     }
-    return getNodeDefinition(labRegistry, selectedLocalNode.type);
-  }, [selectedLocalNode]);
+    return getNodeDefinition(registry, selectedLocalNode.type);
+  }, [registry, selectedLocalNode]);
 
   const selectedWiredPorts = useMemo(() => {
     const wired = new Set<string>();
@@ -807,6 +851,7 @@ export default function App() {
                     <GraphErrorBoundary resetKey={doc.id}>
                       <LabGraphPanel
                         graph={doc.graph ?? emptyImpGraph()}
+                        registry={registry}
                         fitViewKey={doc.id}
                         onGraphChange={(graph) => updateDocGraph(doc.id, graph)}
                         onSelectionChange={

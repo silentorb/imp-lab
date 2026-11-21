@@ -17,7 +17,8 @@ This repo must not depend on Aura (`aura_*`) crates. Product hosts compose lab c
 | --- | --- | --- |
 | `crates/imp_documents/` | Backend | Multi-document session store with host-defined payloads |
 | `crates/imp_graph_editor/` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, layout, edit helpers, chrome widgets) |
-| `apps/tauri/` | Frontend (Tauri) | Experimental Imp desktop shell; Open/Save bridged; editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports, Add palette, selected-node Title + input literals in Properties, on-node literal fields); Edit Undo/Redo for Imp document history; host ELK layered LR layout; Aura catalogs not loaded; Simple mode deferred |
+| `crates/imp_lab_extensions/` | Backend | Tome-shaped optional `extensions.json` parse + dynamically linked extension loading (`imp-catalog`) |
+| `apps/tauri/` | Frontend (Tauri) | Experimental Imp desktop shell; Open/Save bridged; editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports, Add palette, selected-node Title + input literals in Properties, on-node literal fields); Edit Undo/Redo for Imp document history; host ELK layered LR layout; optional Aura catalogs via Lab pack / `extensions.json` (no Aura crate dep); Simple mode deferred |
 
 ## Commands
 
@@ -49,6 +50,7 @@ Repos and projects use **kebab-case** (`imp-lab`). Rust crates use **snake_case*
 ## Where to look
 
 - [`docs/rust-style.md`](docs/rust-style.md) — Rust conventions (links to imp-rs)
+- [`docs/features/extensions.md`](docs/features/extensions.md) — optional Tome-shaped extensions (`libraryPath` + `clientModule`)
 - [imp-rs](https://github.com/silentorb/imp-rs) — Imp core types and runtime crates
 - [imp-spec](https://github.com/silentorb/imp-spec) — language-neutral Imp specs
 - [imp-graph-view](https://github.com/silentorb/imp-graph-view) — Imp ↔ React Flow converters (Tauri shell)

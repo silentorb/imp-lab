@@ -11,13 +11,14 @@ import {
 import "@xyflow/react/dist/style.css";
 import "imp-graph-view/styles.css";
 import { missingNodeIds } from "imp-graph-view";
+import type { Registry } from "imp-registry";
 import { estimateNodeSize, layoutGraph } from "./layoutGraph";
 import { resolvePorts } from "./ports";
-import { labRegistry } from "./registry";
 import classes from "./LabGraphPanel.module.css";
 
 type LabGraphPanelProps = {
   graph: Graph;
+  registry: Registry;
   onGraphChange: (graph: Graph) => void;
   onSelectionChange?: (selection: GraphSelection) => void;
   /** Stable per document tab — fits once on open, not on every topology edit. */
@@ -26,6 +27,7 @@ type LabGraphPanelProps = {
 
 export function LabGraphPanel({
   graph,
+  registry,
   onGraphChange,
   onSelectionChange,
   fitViewKey,
@@ -33,9 +35,12 @@ export function LabGraphPanel({
   const { colorScheme } = useMantineColorScheme();
   const [layout, setLayout] = useState<Map<string, LayoutBox>>(new Map());
 
-  const resolve: ResolvePorts = useCallback((nodeType, nodeId, edges) => {
-    return resolvePorts(labRegistry, nodeType, nodeId, edges as Edge[]);
-  }, []);
+  const resolve: ResolvePorts = useCallback(
+    (nodeType, nodeId, edges) => {
+      return resolvePorts(registry, nodeType, nodeId, edges as Edge[]);
+    },
+    [registry],
+  );
 
   const topologyKey = useMemo(() => {
     const nodes = Object.keys(graph.nodes).sort().join(",");
@@ -58,7 +63,7 @@ export function LabGraphPanel({
 
     const sizes = new Map<string, { width: number; height: number }>();
     const sizeFor = (id: string, type: string) => {
-      const ports = resolvePorts(labRegistry, type, id, []);
+      const ports = resolvePorts(registry, type, id, []);
       let inputSlots = 0;
       let hasSingletonInputs = false;
       for (const port of ports.inputs) {
@@ -95,7 +100,7 @@ export function LabGraphPanel({
     return () => {
       cancelled = true;
     };
-  }, [topologyKey, graph]);
+  }, [topologyKey, graph, registry]);
 
   const rfColorMode = colorScheme === "light" ? "light" : "dark";
 

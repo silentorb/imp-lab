@@ -1,0 +1,15 @@
+[package]
+name = "imp_lab_extensions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tome-shaped extensions.json parse and dynamically linked extension loading for Imp Lab"
+
+[dependencies]
+libloading = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
