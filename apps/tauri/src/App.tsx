@@ -40,6 +40,7 @@ import {
   CMD_DOCUMENT_SAVE_AS,
   CMD_EDIT_REDO,
   CMD_EDIT_UNDO,
+  CMD_PLAY_TOGGLE,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
   type EditorCommandPayload,
@@ -74,6 +75,15 @@ type ExtensionsLoadDto = {
     nodeLibraries?: unknown[];
     typeConstraintLibraries?: unknown[];
     graphLibraries?: unknown[];
+  };
+  contributions?: {
+    commandIds?: string[];
+    menuItems?: Array<{
+      commandId: string;
+      label: string;
+      menu: string;
+      order: number;
+    }>;
   };
 };
 
@@ -126,6 +136,11 @@ export default function App() {
     "Prototype · Open / Save bridged · Imp graphs editable",
   );
   const [registry, setRegistry] = useState<Registry>(() => getLabRegistry());
+  const [extensionCommandIds, setExtensionCommandIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const extensionCommandIdsRef = useRef(extensionCommandIds);
+  extensionCommandIdsRef.current = extensionCommandIds;
 
   useEffect(() => {
     let cancelled = false;
@@ -139,12 +154,21 @@ export default function App() {
           console.warn("imp-lab extensions:", warning);
         }
         setRegistry(getLabRegistry(loaded.catalogs ?? null));
+        const commandIds = new Set(loaded.contributions?.commandIds ?? []);
+        setExtensionCommandIds(commandIds);
         const n = loaded.catalogs?.nodeLibraries?.length ?? 0;
+        const parts: string[] = [];
         if (n > 0) {
+          parts.push(`${n} extension catalog libraries`);
+        }
+        if (commandIds.size > 0) {
+          parts.push(`${commandIds.size} extension commands`);
+        }
+        if (parts.length > 0) {
           setStatus((prev) =>
-            prev.includes("catalogs")
+            parts.every((p) => prev.includes(p.split(" ")[0]!))
               ? prev
-              : `${prev} · ${n} extension catalog libraries`,
+              : `${prev} · ${parts.join(" · ")}`,
           );
         }
       } catch (err) {
@@ -526,6 +550,40 @@ export default function App() {
     [activeId, documents, updateDocGraph],
   );
 
+  const runExtensionCommand = useCallback(
+    async (id: string) => {
+      const docs = documentsRef.current;
+      const doc = docs.find((d) => d.id === activeId) ?? docs[0];
+      const graph = doc?.graph;
+      if (!graph && (id === "play.start" || id === "play.toggle")) {
+        setStatus("Open or create a graph before playing");
+        return;
+      }
+      const neighborPath =
+        doc && !isUntitledOrigin(doc.origin) ? doc.origin : null;
+      try {
+        await invoke("run_extension_command", {
+          id,
+          graphJson: graph ? JSON.stringify(graph) : null,
+          neighborPath,
+        });
+        if (id === "play.stop") {
+          setStatus("Playback stopped");
+        } else if (id === "play.start") {
+          setStatus("Playback started");
+        } else if (id === "play.toggle") {
+          setStatus("Playback toggled");
+        } else {
+          setStatus(`Ran · ${id}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setStatus(`Command failed · ${id}: ${message}`);
+      }
+    },
+    [activeId],
+  );
+
   const dispatchCommand = useCallback(
     (id: string) => {
       switch (id) {
@@ -562,7 +620,11 @@ export default function App() {
           toggleColorScheme();
           break;
         default:
-          setStatus(`Unhandled command · ${id}`);
+          if (extensionCommandIdsRef.current.has(id)) {
+            void runExtensionCommand(id);
+          } else {
+            setStatus(`Unhandled command · ${id}`);
+          }
           break;
       }
     },
@@ -570,6 +632,7 @@ export default function App() {
       closeActive,
       openFile,
       redoActive,
+      runExtensionCommand,
       saveActive,
       saveActiveAs,
       toggleColorScheme,
@@ -597,6 +660,27 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
+  }, [dispatchCommand]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" && event.key !== " ") {
+        return;
+      }
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        return;
+      }
+      if (isTextEditingTarget(document.activeElement)) {
+        return;
+      }
+      if (!extensionCommandIdsRef.current.has(CMD_PLAY_TOGGLE)) {
+        return;
+      }
+      event.preventDefault();
+      dispatchCommand(CMD_PLAY_TOGGLE);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, [dispatchCommand]);
 
   return (

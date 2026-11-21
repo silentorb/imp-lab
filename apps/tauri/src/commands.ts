@@ -9,6 +9,11 @@ export const CMD_EDIT_UNDO = "edit.undo";
 export const CMD_EDIT_REDO = "edit.redo";
 export const CMD_VIEW_TOGGLE_COLOR_SCHEME = "view.toggle-color-scheme";
 
+/** Extension-contributed play commands (present when Aura playback pack is loaded). */
+export const CMD_PLAY_START = "play.start";
+export const CMD_PLAY_STOP = "play.stop";
+export const CMD_PLAY_TOGGLE = "play.toggle";
+
 /** Channel for native menu → React command dispatch. */
 
 export const EDITOR_COMMAND_EVENT = "editor://command";

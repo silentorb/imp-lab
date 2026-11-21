@@ -1,7 +1,10 @@
-//! Native application menu bar (File / Edit / View).
+//! Native application menu bar (File / Edit / View + extension contributions).
 //!
 //! Clicks emit `editor://command` for the React shell to handle.
 
+use crate::extensions;
+use imp_lab_extensions::menu_contributions_from_config;
+use std::collections::BTreeMap;
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
@@ -14,7 +17,7 @@ const CMD_EDIT_UNDO: &str = "edit.undo";
 const CMD_EDIT_REDO: &str = "edit.redo";
 const CMD_VIEW_TOGGLE_COLOR_SCHEME: &str = "view.toggle-color-scheme";
 
-/// Builds the global File / Edit / View menu bar.
+/// Builds the global File / Edit / View menu bar, plus extension submenus.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let file = SubmenuBuilder::new(app, "File")
         .text(CMD_DOCUMENT_OPEN_FILE, "Open File…")
@@ -39,9 +42,27 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .text(CMD_VIEW_TOGGLE_COLOR_SCHEME, "Toggle light/dark")
         .build()?;
 
-    MenuBuilder::new(app)
+    let mut builder = MenuBuilder::new(app)
         .item(&file)
         .item(&edit)
-        .item(&view)
-        .build()
+        .item(&view);
+
+    let runtime = extensions::ensure_loaded();
+    if let Some(config) = runtime.config.as_ref() {
+        let items = menu_contributions_from_config(config);
+        let mut by_menu: BTreeMap<&str, Vec<_>> = BTreeMap::new();
+        for item in &items {
+            by_menu.entry(item.menu.as_str()).or_default().push(item);
+        }
+        for (menu_title, menu_items) in by_menu {
+            let mut sub = SubmenuBuilder::new(app, menu_title);
+            for item in menu_items {
+                sub = sub.text(&item.command_id, &item.label);
+            }
+            let submenu = sub.build()?;
+            builder = builder.item(&submenu);
+        }
+    }
+
+    builder.build()
 }

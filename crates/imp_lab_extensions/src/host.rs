@@ -1,5 +1,6 @@
 //! Host ABI for dynamically linked Lab extensions (lockstep with Lab).
 
+use crate::service::{cstr_to_string, ImpLabServiceV0, ServiceRegistry};
 use serde_json::Value;
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::os::raw::c_uchar;
@@ -9,6 +10,7 @@ pub struct ExtensionHost {
     pub(crate) node_libraries: Vec<Value>,
     pub(crate) type_constraint_libraries: Vec<Value>,
     pub(crate) graph_libraries: Vec<Value>,
+    pub(crate) services: ServiceRegistry,
     pub(crate) pack_root: std::path::PathBuf,
 }
 
@@ -19,6 +21,7 @@ impl ExtensionHost {
             node_libraries: Vec::new(),
             type_constraint_libraries: Vec::new(),
             graph_libraries: Vec::new(),
+            services: ServiceRegistry::default(),
             pack_root: pack_root.into(),
         }
     }
@@ -36,6 +39,11 @@ impl ExtensionHost {
     /// Imp `GraphLibrary` JSON objects.
     pub fn graph_libraries(&self) -> &[Value] {
         &self.graph_libraries
+    }
+
+    /// Services registered during this library's `imp_lab_extension_register`.
+    pub fn services(&self) -> &ServiceRegistry {
+        &self.services
     }
 
     /// Pack root used to resolve relative asset paths for the extension.
@@ -68,6 +76,14 @@ pub struct ImpLabHostV0 {
             relative: *const c_char,
             out: *mut c_char,
             out_len: usize,
+        ) -> c_int,
+    >,
+    /// Register a long-lived service vtable keyed by implementation id.
+    pub register_service: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            implementation_id: *const c_char,
+            service: *const ImpLabServiceV0,
         ) -> c_int,
     >,
 }
@@ -129,6 +145,25 @@ unsafe extern "C" fn resolve_pack_path(
     0
 }
 
+unsafe extern "C" fn register_service(
+    ctx: *mut c_void,
+    implementation_id: *const c_char,
+    service: *const ImpLabServiceV0,
+) -> c_int {
+    if ctx.is_null() || service.is_null() {
+        return -1;
+    }
+    let Some(id) = cstr_to_string(implementation_id) else {
+        return -1;
+    };
+    if id.is_empty() {
+        return -1;
+    }
+    let host = &mut *(ctx as *mut ExtensionHost);
+    host.services.insert(id, *service);
+    0
+}
+
 unsafe fn push_json(
     ctx: *mut c_void,
     json: *const c_uchar,
@@ -160,6 +195,7 @@ pub fn host_vtable(host: &mut ExtensionHost) -> ImpLabHostV0 {
         add_type_constraint_library_json: Some(add_type_constraint_library_json),
         add_graph_library_json: Some(add_graph_library_json),
         resolve_pack_path: Some(resolve_pack_path),
+        register_service: Some(register_service),
     }
 }
 

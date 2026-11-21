@@ -73,6 +73,24 @@ pub struct ComponentConfig {
 pub enum ComponentKind {
     /// Imp node / constraint / graph library catalogs.
     ImpCatalog,
+    /// Host command id (Aura Iced-style: `play.start`).
+    Command,
+    /// Native menu entry that emits a command id (`implementationId`).
+    MenuItem,
+    /// Long-lived host backend registered by the extension cdylib.
+    Service,
+}
+
+impl ComponentKind {
+    /// Kebab-case kind string for DTOs / docs.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ImpCatalog => "imp-catalog",
+            Self::Command => "command",
+            Self::MenuItem => "menu-item",
+            Self::Service => "service",
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -165,5 +183,43 @@ mod tests {
             err,
             ExtensionsError::UnsupportedVersion { found: 2 }
         ));
+    }
+
+    #[test]
+    fn parses_command_menu_and_service_kinds() {
+        let json = r#"{
+          "version": 1,
+          "extensions": [{"id":"aura-playback","enabled":true,"libraryPath":"extensions/x"}],
+          "components": [
+            {
+              "id":"aura-playback",
+              "extensionId":"aura-playback",
+              "kind":"service",
+              "implementationId":"playback",
+              "enabled":true
+            },
+            {
+              "id":"play.start",
+              "extensionId":"aura-playback",
+              "kind":"command",
+              "implementationId":"play.start",
+              "enabled":true,
+              "params":{"serviceId":"aura-playback","action":"start"}
+            },
+            {
+              "id":"menu.play.start",
+              "extensionId":"aura-playback",
+              "kind":"menu-item",
+              "implementationId":"play.start",
+              "label":"Start",
+              "enabled":true,
+              "params":{"menu":"Play","order":10}
+            }
+          ]
+        }"#;
+        let config = parse_extensions_json(json).expect("parse");
+        assert_eq!(config.components[0].kind, ComponentKind::Service);
+        assert_eq!(config.components[1].kind, ComponentKind::Command);
+        assert_eq!(config.components[2].kind, ComponentKind::MenuItem);
     }
 }

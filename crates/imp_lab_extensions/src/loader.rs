@@ -6,12 +6,17 @@ use crate::config::{
 use crate::host::{
     host_vtable, ExtensionHost, ExtensionRegisterFn, EXTENSION_REGISTER_SYMBOL,
 };
+use crate::service::{
+    invoke_service_action, menu_contributions_from_config, resolve_command_action,
+    CommandDispatchError, MenuItemContribution, ServiceRegistry,
+};
 use libloading::Library;
 use serde::Serialize;
 use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use thiserror::Error;
 
 /// Catalogs collected from enabled `imp-catalog` extensions.
@@ -23,7 +28,38 @@ pub struct LoadedCatalogs {
     pub graph_libraries: Vec<Value>,
 }
 
-/// Result of loading optional extensions for a Lab host.
+/// Serializable contribution snapshot for the webview (no service vtables).
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtensionContributions {
+    /// Enabled command ids.
+    pub command_ids: Vec<String>,
+    /// Menu items grouped for native chrome / optional client bindings.
+    pub menu_items: Vec<MenuItemContributionDto>,
+}
+
+/// Serde-friendly menu item for the frontend.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MenuItemContributionDto {
+    pub command_id: String,
+    pub label: String,
+    pub menu: String,
+    pub order: i64,
+}
+
+impl From<&MenuItemContribution> for MenuItemContributionDto {
+    fn from(item: &MenuItemContribution) -> Self {
+        Self {
+            command_id: item.command_id.clone(),
+            label: item.label.clone(),
+            menu: item.menu.clone(),
+            order: item.order,
+        }
+    }
+}
+
+/// Result of loading optional extensions for a Lab host (webview-safe).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionsLoadResult {
@@ -37,6 +73,64 @@ pub struct ExtensionsLoadResult {
     pub warnings: Vec<String>,
     /// Catalogs from successful `imp-catalog` loads.
     pub catalogs: LoadedCatalogs,
+    /// Command / menu contributions from the config (even when libraries fail).
+    pub contributions: ExtensionContributions,
+}
+
+/// Full runtime after load: DTO snapshot + retained services + parsed config.
+pub struct ExtensionsRuntime {
+    /// Webview-safe load snapshot.
+    pub result: ExtensionsLoadResult,
+    /// Parsed config when valid (needed for command resolve).
+    pub config: Option<ExtensionsConfig>,
+    /// Registered service vtables keyed by implementation id.
+    pub services: Mutex<ServiceRegistry>,
+}
+
+impl ExtensionsRuntime {
+    /// Empty runtime (no pack).
+    pub fn empty() -> Self {
+        Self {
+            result: ExtensionsLoadResult {
+                config: None,
+                pack_root: None,
+                config_path: None,
+                warnings: Vec::new(),
+                catalogs: LoadedCatalogs::default(),
+                contributions: ExtensionContributions::default(),
+            },
+            config: None,
+            services: Mutex::new(ServiceRegistry::default()),
+        }
+    }
+
+    /// Run an extension command against a registered service.
+    pub fn run_command(
+        &self,
+        command_id: &str,
+        graph_json: Option<&str>,
+        neighbor_path: Option<&str>,
+    ) -> Result<Option<bool>, CommandDispatchError> {
+        let config = self
+            .config
+            .as_ref()
+            .ok_or_else(|| CommandDispatchError::UnknownCommand(command_id.to_string()))?;
+        let resolved = resolve_command_action(config, command_id)?;
+        let services = self
+            .services
+            .lock()
+            .map_err(|_| CommandDispatchError::ServiceFailed("service registry poisoned".into()))?;
+        let vtable = services
+            .get(&resolved.service_implementation_id)
+            .copied()
+            .ok_or_else(|| {
+                CommandDispatchError::ServiceNotRegistered(
+                    resolved.service_implementation_id.clone(),
+                )
+            })?;
+        drop(services);
+        unsafe { invoke_service_action(&vtable, &resolved.action, graph_json, neighbor_path) }
+    }
 }
 
 /// Serde-friendly config mirror for the frontend (keeps camelCase).
@@ -116,34 +210,26 @@ pub fn resolve_extensions_config_path() -> Option<PathBuf> {
 }
 
 /// Load optional extensions from the default search path.
-pub fn load_extensions_default() -> ExtensionsLoadResult {
+pub fn load_extensions_default() -> ExtensionsRuntime {
     match resolve_extensions_config_path() {
         Some(path) => load_extensions_from_path(&path),
-        None => ExtensionsLoadResult {
-            config: None,
-            pack_root: None,
-            config_path: None,
-            warnings: Vec::new(),
-            catalogs: LoadedCatalogs::default(),
-        },
+        None => ExtensionsRuntime::empty(),
     }
 }
 
 /// Load extensions from an explicit `extensions.json` path.
-pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsLoadResult {
+pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsRuntime {
     let mut warnings = Vec::new();
     let config_path_str = config_path.display().to_string();
     let text = match fs::read_to_string(config_path) {
         Ok(t) => t,
         Err(err) => {
             warnings.push(format!("failed to read {config_path_str}: {err}"));
-            return ExtensionsLoadResult {
-                config: None,
-                pack_root: config_path.parent().map(|p| p.display().to_string()),
-                config_path: Some(config_path_str),
-                warnings,
-                catalogs: LoadedCatalogs::default(),
-            };
+            let mut runtime = ExtensionsRuntime::empty();
+            runtime.result.pack_root = config_path.parent().map(|p| p.display().to_string());
+            runtime.result.config_path = Some(config_path_str);
+            runtime.result.warnings = warnings;
+            return runtime;
         }
     };
 
@@ -151,13 +237,11 @@ pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsLoadResult {
         Ok(c) => c,
         Err(err) => {
             warnings.push(format!("extensions config error ({config_path_str}): {err}"));
-            return ExtensionsLoadResult {
-                config: None,
-                pack_root: config_path.parent().map(|p| p.display().to_string()),
-                config_path: Some(config_path_str),
-                warnings,
-                catalogs: LoadedCatalogs::default(),
-            };
+            let mut runtime = ExtensionsRuntime::empty();
+            runtime.result.pack_root = config_path.parent().map(|p| p.display().to_string());
+            runtime.result.config_path = Some(config_path_str);
+            runtime.result.warnings = warnings;
+            return runtime;
         }
     };
 
@@ -167,6 +251,7 @@ pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsLoadResult {
         .unwrap_or_else(|| PathBuf::from("."));
 
     let mut catalogs = LoadedCatalogs::default();
+    let mut services = ServiceRegistry::default();
     // Keep libraries alive for the process (extensions may hold TLS / statics).
     let mut _libs: Vec<Library> = Vec::new();
 
@@ -184,6 +269,10 @@ pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsLoadResult {
                         .extend(host.type_constraint_libraries);
                     catalogs.graph_libraries.extend(host.graph_libraries);
                 }
+                // Retain services from every successful library load.
+                for (id, vtable) in host.services.into_map() {
+                    services.insert(id, vtable);
+                }
                 _libs.push(lib);
             }
             Err(err) => warnings.push(err.to_string()),
@@ -193,12 +282,38 @@ pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsLoadResult {
     // Leak libraries for process lifetime so extension code stays mapped.
     std::mem::forget(_libs);
 
-    ExtensionsLoadResult {
-        config: Some(config_to_dto(&config)),
-        pack_root: Some(pack_root.display().to_string()),
-        config_path: Some(config_path_str),
-        warnings,
-        catalogs,
+    let contributions = contributions_from_config(&config);
+
+    ExtensionsRuntime {
+        result: ExtensionsLoadResult {
+            config: Some(config_to_dto(&config)),
+            pack_root: Some(pack_root.display().to_string()),
+            config_path: Some(config_path_str),
+            warnings,
+            catalogs,
+            contributions,
+        },
+        config: Some(config),
+        services: Mutex::new(services),
+    }
+}
+
+fn contributions_from_config(config: &ExtensionsConfig) -> ExtensionContributions {
+    let menu_items: Vec<MenuItemContributionDto> = menu_contributions_from_config(config)
+        .iter()
+        .map(MenuItemContributionDto::from)
+        .collect();
+    let mut command_ids: Vec<String> = config
+        .components
+        .iter()
+        .filter(|c| c.enabled && matches!(c.kind, ComponentKind::Command))
+        .map(|c| c.id.clone())
+        .collect();
+    command_ids.sort();
+    command_ids.dedup();
+    ExtensionContributions {
+        command_ids,
+        menu_items,
     }
 }
 
@@ -289,9 +404,7 @@ fn config_to_dto(config: &ExtensionsConfig) -> ExtensionsConfigDto {
             .map(|c| ComponentConfigDto {
                 id: c.id.clone(),
                 extension_id: c.extension_id.clone(),
-                kind: match c.kind {
-                    ComponentKind::ImpCatalog => "imp-catalog".into(),
-                },
+                kind: c.kind.as_str().into(),
                 implementation_id: c.implementation_id.clone(),
                 enabled: c.enabled,
                 label: c.label.clone(),
@@ -311,11 +424,10 @@ mod tests {
     fn missing_config_is_empty_ok() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("extensions.json");
-        // path does not exist
-        let result = load_extensions_from_path(&path);
-        assert!(result.config.is_none());
-        assert!(!result.warnings.is_empty());
-        assert!(result.catalogs.node_libraries.is_empty());
+        let runtime = load_extensions_from_path(&path);
+        assert!(runtime.result.config.is_none());
+        assert!(!runtime.result.warnings.is_empty());
+        assert!(runtime.result.catalogs.node_libraries.is_empty());
     }
 
     #[test]
@@ -324,13 +436,17 @@ mod tests {
         let path = dir.path().join("extensions.json");
         let mut f = fs::File::create(&path).unwrap();
         write!(f, r#"{{"version":99,"extensions":[],"components":[]}}"#).unwrap();
-        let result = load_extensions_from_path(&path);
-        assert!(result.config.is_none());
-        assert!(result.warnings.iter().any(|w| w.contains("version")));
+        let runtime = load_extensions_from_path(&path);
+        assert!(runtime.result.config.is_none());
+        assert!(runtime
+            .result
+            .warnings
+            .iter()
+            .any(|w| w.contains("version")));
     }
 
     #[test]
-    fn valid_config_without_library_loads_dto() {
+    fn valid_config_without_library_loads_dto_and_contributions() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("extensions.json");
         fs::write(
@@ -338,14 +454,44 @@ mod tests {
             r#"{
               "version": 1,
               "extensions": [{"id":"x","enabled":true,"clientModule":"x/client"}],
-              "components": []
+              "components": [
+                {
+                  "id":"play.start",
+                  "extensionId":"x",
+                  "kind":"command",
+                  "implementationId":"play.start",
+                  "enabled":true,
+                  "params":{"serviceId":"svc","action":"start"}
+                },
+                {
+                  "id":"menu.play.start",
+                  "extensionId":"x",
+                  "kind":"menu-item",
+                  "implementationId":"play.start",
+                  "label":"Start",
+                  "enabled":true,
+                  "params":{"menu":"Play","order":1}
+                }
+              ]
             }"#,
         )
         .unwrap();
-        let result = load_extensions_from_path(&path);
-        assert!(result.warnings.is_empty());
-        let config = result.config.expect("config");
-        assert_eq!(config.extensions[0].client_module.as_deref(), Some("x/client"));
+        let runtime = load_extensions_from_path(&path);
+        assert!(runtime.result.warnings.is_empty());
+        let config = runtime.result.config.expect("config");
+        assert_eq!(
+            config.extensions[0].client_module.as_deref(),
+            Some("x/client")
+        );
+        assert_eq!(
+            runtime.result.contributions.command_ids,
+            vec!["play.start".to_string()]
+        );
+        assert_eq!(runtime.result.contributions.menu_items.len(), 1);
+        assert_eq!(
+            runtime.result.contributions.menu_items[0].menu,
+            "Play"
+        );
     }
 
     #[test]
@@ -356,19 +502,27 @@ mod tests {
         if !pack.is_file() {
             return;
         }
-        let result = load_extensions_from_path(&pack);
-        if result.catalogs.node_libraries.is_empty() {
+        let runtime = load_extensions_from_path(&pack);
+        if runtime.result.catalogs.node_libraries.is_empty() {
             // Pack present but cdylib not built into extensions/ — acceptable in CI without the artifact.
             assert!(
-                result.warnings.iter().any(|w| w.contains("dynamic library") || w.contains("load")),
+                runtime
+                    .result
+                    .warnings
+                    .iter()
+                    .any(|w| w.contains("dynamic library") || w.contains("load")),
                 "expected load warning when cdylib missing, got {:?}",
-                result.warnings
+                runtime.result.warnings
             );
             return;
         }
-        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
-        assert!(result.catalogs.node_libraries.len() >= 4);
-        assert_eq!(result.catalogs.type_constraint_libraries.len(), 1);
+        assert!(
+            runtime.result.warnings.is_empty(),
+            "{:?}",
+            runtime.result.warnings
+        );
+        assert!(runtime.result.catalogs.node_libraries.len() >= 4);
+        assert_eq!(runtime.result.catalogs.type_constraint_libraries.len(), 1);
     }
 }
 

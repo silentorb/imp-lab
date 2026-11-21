@@ -18,15 +18,21 @@ fn ping() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Load optional pack extensions once at startup (logs warnings to stderr).
-    let loaded = extensions::get_extensions_load();
-    for warning in &loaded.warnings {
+    // Load optional pack extensions once at startup (before menu build).
+    let loaded = extensions::ensure_loaded();
+    for warning in &loaded.result.warnings {
         eprintln!("imp-lab extensions: {warning}");
     }
-    if let Some(root) = &loaded.pack_root {
+    if let Some(root) = &loaded.result.pack_root {
         eprintln!(
-            "imp-lab extensions: loaded pack root {root} ({} node libraries)",
-            loaded.catalogs.node_libraries.len()
+            "imp-lab extensions: loaded pack root {root} ({} node libraries, {} services, {} commands)",
+            loaded.result.catalogs.node_libraries.len(),
+            loaded
+                .services
+                .lock()
+                .map(|s| s.len())
+                .unwrap_or(0),
+            loaded.result.contributions.command_ids.len()
         );
     }
 
@@ -46,7 +52,8 @@ pub fn run() {
             save::save_document_file,
             save::pick_and_save_document,
             extensions::get_extensions_load,
-            extensions::load_extensions_file
+            extensions::load_extensions_file,
+            extensions::run_extension_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
