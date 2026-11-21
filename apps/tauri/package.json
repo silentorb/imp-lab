@@ -9,8 +9,9 @@
     "../../../imp-ts/packages/*"
   ],
   "scripts": {
+    "postinstall": "node ./scripts/link-graph-view-peers.mjs",
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "node ./scripts/link-graph-view-peers.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "bun test src/layoutGraph.test.ts src/documentHistory.test.ts src/piano-roll/edits.test.ts src/piano-roll/notationHistory.test.ts src/bindings.test.ts",
     "tauri": "tauri"

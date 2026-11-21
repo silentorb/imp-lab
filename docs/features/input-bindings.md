@@ -21,6 +21,7 @@ Menus are a view/delivery surface over the bindings table—not a second competi
 - Unknown command ids (not in builtin host ids ∪ loaded extension `command` ids) are skipped.
 - Unsupported `version` ≠ 1 fails that file; the load chain continues.
 - No bindings settings UI; users may hand-edit the JSON. Writing the file from the app is out of scope.
+- The same config dir also holds [UI-state buckets](user-state.md) (`documents.json`, `ui.json`, `window.json`); those are a separate concern and do not merge with bindings.
 
 ## Schema (version 1)
 

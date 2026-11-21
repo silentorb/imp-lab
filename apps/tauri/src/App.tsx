@@ -92,6 +92,17 @@ import {
   type PianoRollUiPrefs,
 } from "./piano-roll";
 import { getLabRegistry } from "./registry";
+import {
+  collectOpenDocumentsEntry,
+  ENTRY_OPEN_DOCUMENTS,
+  ENTRY_PIANO_ROLL_UI,
+  getUserStateEntry,
+  pianoEntryToPrefs,
+  pianoPrefsToEntry,
+  setUserStateEntry,
+  type OpenDocumentsEntry,
+  type PianoRollUiEntry,
+} from "./userState";
 import classes from "./App.module.css";
 
 type ExtensionsLoadDto = {
@@ -158,6 +169,35 @@ const DEFAULT_PIANO_PREFS: PianoRollUiPrefs = {
   snapResolution: "1/16",
 };
 
+/** Build tab + history state for a host-opened document DTO. */
+function materializeOpenedDocument(dto: DocumentSummaryDto): {
+  doc: EditorDocument;
+  graphHistory?: GraphHistory;
+  notationHistory?: NotationHistory;
+  playhead?: number;
+} {
+  const doc = documentFromDto(dto);
+  if (doc.kind === "notation") {
+    const parsed = notationFromUnknown(
+      doc.notation ?? emptyNotation(doc.id),
+    );
+    const opened = {
+      ...doc,
+      notation: parsed,
+      summary: summarizeNotation(parsed),
+    };
+    return {
+      doc: opened,
+      notationHistory: createNotationHistory(parsed),
+      playhead: 0,
+    };
+  }
+  return {
+    doc,
+    graphHistory: createHistory(doc.graph ?? emptyImpGraph()),
+  };
+}
+
 export default function App() {
   const { colorScheme, setColorScheme, toggleColorScheme } =
     useMantineColorScheme();
@@ -201,6 +241,8 @@ export default function App() {
   const [inputBindings, setInputBindings] = useState<BindingDto[]>([]);
   const inputBindingsRef = useRef(inputBindings);
   inputBindingsRef.current = inputBindings;
+  /** False until startup restore finishes so sync effects skip the empty initial frame. */
+  const uiStateReadyRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,6 +300,120 @@ export default function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const pianoEntry = await getUserStateEntry<PianoRollUiEntry>(
+          ENTRY_PIANO_ROLL_UI,
+        );
+        if (cancelled) {
+          return;
+        }
+        if (pianoEntry) {
+          setPianoPrefs(pianoEntryToPrefs(pianoEntry, DEFAULT_PIANO_PREFS));
+        }
+
+        const openEntry = await getUserStateEntry<OpenDocumentsEntry>(
+          ENTRY_OPEN_DOCUMENTS,
+        );
+        if (cancelled) {
+          return;
+        }
+        const paths = openEntry?.openPaths ?? [];
+        if (paths.length === 0) {
+          return;
+        }
+
+        const nextDocs: EditorDocument[] = [];
+        const nextHistories: Record<string, GraphHistory> = {};
+        const nextNotationHistories: Record<string, NotationHistory> = {};
+        const nextPlayheads: Record<string, number> = {};
+        const warnings: string[] = [];
+
+        for (const path of paths) {
+          try {
+            const dto = await invoke<DocumentSummaryDto>("open_document_file", {
+              path,
+            });
+            const material = materializeOpenedDocument(dto);
+            nextDocs.push(material.doc);
+            if (material.graphHistory) {
+              nextHistories[material.doc.id] = material.graphHistory;
+            }
+            if (material.notationHistory) {
+              nextNotationHistories[material.doc.id] = material.notationHistory;
+            }
+            if (material.playhead !== undefined) {
+              nextPlayheads[material.doc.id] = material.playhead;
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            warnings.push(`${path}: ${message}`);
+            console.warn("user-state: skip restore open", path, err);
+          }
+        }
+
+        if (cancelled || nextDocs.length === 0) {
+          return;
+        }
+
+        setDocuments(nextDocs);
+        setHistories(nextHistories);
+        setNotationHistories(nextNotationHistories);
+        setPlayheads(nextPlayheads);
+
+        const preferred = openEntry?.activePath ?? null;
+        const active =
+          (preferred && nextDocs.find((d) => d.origin === preferred)?.id) ||
+          nextDocs[0]?.id ||
+          "";
+        setActiveId(active);
+        const skipped = warnings.length;
+        setStatus(
+          skipped > 0
+            ? `Restored ${nextDocs.length} tab(s) · ${skipped} skipped`
+            : `Restored ${nextDocs.length} tab(s)`,
+        );
+      } catch (err) {
+        console.warn("user-state restore failed", err);
+      } finally {
+        if (!cancelled) {
+          uiStateReadyRef.current = true;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!uiStateReadyRef.current) {
+      return;
+    }
+    const entry = collectOpenDocumentsEntry(
+      documents,
+      activeId,
+      isUntitledOrigin,
+    );
+    void setUserStateEntry(ENTRY_OPEN_DOCUMENTS, entry).catch((err) => {
+      console.warn("user-state: persist open-documents failed", err);
+    });
+  }, [documents, activeId]);
+
+  useEffect(() => {
+    if (!uiStateReadyRef.current) {
+      return;
+    }
+    void setUserStateEntry(
+      ENTRY_PIANO_ROLL_UI,
+      pianoPrefsToEntry(pianoPrefs),
+    ).catch((err) => {
+      console.warn("user-state: persist piano-roll-ui failed", err);
+    });
+  }, [pianoPrefs]);
 
   const paletteTypes = useMemo(() => {
     const ids = new Set(
@@ -480,29 +636,29 @@ export default function App() {
         setStatus("Open File… cancelled");
         return;
       }
-      const doc = documentFromDto(result);
-      const existing = documents.find((d) => d.origin === doc.origin);
+      const existing = documents.find((d) => d.origin === result.origin);
       if (existing) {
         // Activate in the same turn so the graph pane is not 0x0 during fitView.
         setActiveId(existing.id);
         setStatus(`Activated · ${existing.title}`);
         return;
       }
-      let opened = doc;
-      if (doc.kind === "notation") {
-        const parsed = notationFromUnknown(
-          doc.notation ?? emptyNotation(doc.id),
-        );
-        opened = { ...doc, notation: parsed, summary: summarizeNotation(parsed) };
+      const material = materializeOpenedDocument(result);
+      const opened = material.doc;
+      if (material.notationHistory) {
         setNotationHistories((prev) => ({
           ...prev,
-          [opened.id]: createNotationHistory(parsed),
+          [opened.id]: material.notationHistory!,
         }));
-        setPlayheads((prev) => ({ ...prev, [opened.id]: 0 }));
-      } else {
+        setPlayheads((prev) => ({
+          ...prev,
+          [opened.id]: material.playhead ?? 0,
+        }));
+      }
+      if (material.graphHistory) {
         setHistories((prev) => ({
           ...prev,
-          [doc.id]: createHistory(doc.graph ?? emptyImpGraph()),
+          [opened.id]: material.graphHistory!,
         }));
       }
       setDocuments((prev) => [...prev, opened]);
