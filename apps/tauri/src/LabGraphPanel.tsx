@@ -57,9 +57,11 @@ export function LabGraphPanel({
     const sizeFor = (id: string, type: string) => {
       const ports = resolvePorts(labRegistry, type, id, []);
       let inputSlots = 0;
+      let hasSingletonInputs = false;
       for (const port of ports.inputs) {
         if (!port.variadic) {
           inputSlots += 1;
+          hasSingletonInputs = true;
         } else {
           const fanIn = Object.values(graph.edges).filter(
             (e) => e.to.node === id && e.to.port === port.id,
@@ -69,7 +71,9 @@ export function LabGraphPanel({
       }
       sizes.set(
         id,
-        estimateNodeSize(inputSlots, Math.max(ports.outputs.length, 1)),
+        estimateNodeSize(inputSlots, Math.max(ports.outputs.length, 1), {
+          hasSingletonInputs,
+        }),
       );
     };
     for (const [id, node] of Object.entries(graph.nodes)) {

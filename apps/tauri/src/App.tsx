@@ -4,6 +4,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   Group,
   SegmentedControl,
   Stack,
@@ -15,9 +16,18 @@ import {
 } from "@mantine/core";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import type { Graph } from "imp-core-types";
-import { addImpNode, setNodeTitle, type GraphSelection } from "imp-graph-view";
-import { listNodeDefinitions } from "imp-registry";
+import type { Graph, Port, PrimitiveValue } from "imp-core-types";
+import {
+  addImpNode,
+  formatLiteralValue,
+  isLiteralEditableSignalType,
+  literalEditorKind,
+  parseLiteralText,
+  setNodeInputLiteral,
+  setNodeTitle,
+  type GraphSelection,
+} from "imp-graph-view";
+import { getNodeDefinition, listNodeDefinitions } from "imp-registry";
 import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
   CMD_DOCUMENT_NEW_GRAPH,
@@ -87,6 +97,36 @@ export default function App() {
     active?.graph != null &&
     !(selectedNodeId in active.graph.nodes);
 
+  const selectedDefinition = useMemo(() => {
+    if (!selectedLocalNode) {
+      return undefined;
+    }
+    return getNodeDefinition(labRegistry, selectedLocalNode.type);
+  }, [selectedLocalNode]);
+
+  const selectedWiredPorts = useMemo(() => {
+    const wired = new Set<string>();
+    if (!selectedNodeId || !active?.graph) {
+      return wired;
+    }
+    for (const edge of Object.values(active.graph.edges)) {
+      if (edge.to.node === selectedNodeId) {
+        wired.add(edge.to.port);
+      }
+    }
+    return wired;
+  }, [active?.graph, selectedNodeId]);
+
+  const selectedLiteralPorts = useMemo(() => {
+    if (!selectedDefinition) {
+      return [] as Port[];
+    }
+    return Object.values(selectedDefinition.inputs).filter(
+      (port) =>
+        port.variadic !== true && isLiteralEditableSignalType(port.type),
+    );
+  }, [selectedDefinition]);
+
   const updateDocGraph = useCallback((docId: string, graph: Graph) => {
     setDocuments((prev) =>
       prev.map((doc) =>
@@ -143,6 +183,29 @@ export default function App() {
       }, 400);
     },
     [clearTitleCommitTimer, commitSelectedTitle],
+  );
+
+  const commitSelectedLiteral = useCallback(
+    (portId: string, value: PrimitiveValue | undefined) => {
+      const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+      if (!doc?.graph || !selectedNodeId) {
+        return;
+      }
+      if (!(selectedNodeId in doc.graph.nodes)) {
+        return;
+      }
+      const next = setNodeInputLiteral(
+        doc.graph,
+        selectedNodeId,
+        portId,
+        value,
+      );
+      if (next === doc.graph) {
+        return;
+      }
+      updateDocGraph(doc.id, next);
+    },
+    [activeId, documents, selectedNodeId, updateDocGraph],
   );
 
   const onGraphSelectionChange = useCallback(
@@ -458,6 +521,56 @@ export default function App() {
                   {selectedLocalNode.type}
                 </Text>
               </Group>
+              {selectedLiteralPorts.length > 0 ? (
+                <Text size="xs" c="dimmed" mt={4}>
+                  Inputs
+                </Text>
+              ) : null}
+              {selectedLiteralPorts.map((port) => {
+                const kind = literalEditorKind(port.type);
+                const wired = selectedWiredPorts.has(port.id);
+                const stored = selectedLocalNode.inputs[port.id];
+                const label = wired ? `${port.id} (wired)` : port.id;
+                if (kind === "boolean") {
+                  return (
+                    <Checkbox
+                      key={port.id}
+                      size="xs"
+                      label={label}
+                      checked={stored === true}
+                      onChange={(event) => {
+                        commitSelectedLiteral(
+                          port.id,
+                          event.currentTarget.checked,
+                        );
+                      }}
+                    />
+                  );
+                }
+                return (
+                  <TextInput
+                    key={port.id}
+                    size="xs"
+                    label={label}
+                    value={formatLiteralValue(stored)}
+                    placeholder={
+                      port.defaultValue !== undefined
+                        ? formatLiteralValue(port.defaultValue)
+                        : undefined
+                    }
+                    type={kind === "number" ? "number" : "text"}
+                    onChange={(event) => {
+                      commitSelectedLiteral(
+                        port.id,
+                        parseLiteralText(
+                          event.currentTarget.value,
+                          port.type,
+                        ),
+                      );
+                    }}
+                  />
+                );
+              })}
             </Stack>
           ) : selectedIsMissing ? (
             <Stack gap={6}>

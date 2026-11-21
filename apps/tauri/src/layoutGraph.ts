@@ -14,15 +14,22 @@ const DEFAULT_SIZE: NodeSize = { width: 168, height: 56 };
 
 const elk = new ELK();
 
+export type EstimateNodeSizeOptions = {
+  /** Wider box when singleton inputs may show on-node literal fields. */
+  hasSingletonInputs?: boolean;
+};
+
 /** Estimate ImpNode box size from resolved port counts. */
 export function estimateNodeSize(
   inputCount: number,
   outputCount: number,
+  options?: EstimateNodeSizeOptions,
 ): NodeSize {
   const rows = Math.max(inputCount, outputCount, 1);
+  const width = options?.hasSingletonInputs ? 220 : 168;
   return {
-    width: 168,
-    height: Math.max(56, 36 + rows * 18),
+    width,
+    height: Math.max(56, 36 + rows * 22),
   };
 }
 
@@ -87,13 +94,11 @@ export async function layoutGraph(
     if (child.x == null || child.y == null) {
       continue;
     }
-    const width = child.width ?? DEFAULT_SIZE.width;
-    const height = child.height ?? DEFAULT_SIZE.height;
     result.set(child.id, {
       x: child.x,
       y: child.y,
-      width,
-      height,
+      width: child.width ?? DEFAULT_SIZE.width,
+      height: child.height ?? DEFAULT_SIZE.height,
     });
   }
   return result;

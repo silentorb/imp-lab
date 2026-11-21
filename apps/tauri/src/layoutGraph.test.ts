@@ -10,10 +10,13 @@ function sizeMap(
 }
 
 describe("estimateNodeSize", () => {
-  test("grows with port rows", () => {
-    expect(estimateNodeSize(0, 0).height).toBe(56);
-    expect(estimateNodeSize(2, 1).height).toBe(36 + 2 * 18);
+  test("grows with port rows and widens for singleton literals", () => {
+    expect(estimateNodeSize(0, 0).height).toBe(Math.max(56, 36 + 22));
+    expect(estimateNodeSize(2, 1).height).toBe(36 + 2 * 22);
     expect(estimateNodeSize(1, 1).width).toBe(168);
+    expect(
+      estimateNodeSize(1, 1, { hasSingletonInputs: true }).width,
+    ).toBe(220);
   });
 });
 
