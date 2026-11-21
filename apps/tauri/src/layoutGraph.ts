@@ -34,7 +34,14 @@ export async function layoutGraph(
   graph: Graph,
   nodeSizes: Map<string, NodeSize>,
 ): Promise<Map<string, LaidOutBox>> {
-  const children = Object.keys(graph.nodes).map((id) => {
+  // Include dangling edge endpoints so missing cards get placed.
+  const nodeIds = new Set(Object.keys(graph.nodes));
+  for (const edge of Object.values(graph.edges)) {
+    nodeIds.add(edge.from.node);
+    nodeIds.add(edge.to.node);
+  }
+
+  const children = [...nodeIds].map((id) => {
     const size = nodeSizes.get(id) ?? DEFAULT_SIZE;
     return {
       id,
@@ -49,9 +56,6 @@ export async function layoutGraph(
     const source = edge.from.node;
     const target = edge.to.node;
     if (source === target) {
-      continue;
-    }
-    if (!graph.nodes[source] || !graph.nodes[target]) {
       continue;
     }
     const pairKey = `${source}\0${target}`;

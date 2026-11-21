@@ -87,6 +87,24 @@ describe("layoutGraph", () => {
     }
   });
 
+  test("places dangling edge endpoints as missing cards", async () => {
+    const graph: Graph = {
+      nodes: {
+        loop: { id: "loop", type: "loop", inputs: {} },
+      },
+      edges: {
+        dangling: {
+          from: { node: "ghost", port: "score" },
+          to: { node: "loop", port: "value" },
+        },
+      },
+    };
+
+    const laid = await layoutGraph(graph, sizeMap(graph));
+    expect(laid.has("loop")).toBe(true);
+    expect(laid.has("ghost")).toBe(true);
+  });
+
   test("collapses port-parallel edges and still places LR", async () => {
     const graph: Graph = {
       nodes: {

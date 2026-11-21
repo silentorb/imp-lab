@@ -115,7 +115,7 @@ fn summarize_imp_graph(path: &Path, value: &Value) -> Result<DocumentSummary, St
         kind: "imp-graph".into(),
         origin: origin.clone(),
         dirty: false,
-        summary: format!("Imp graph · {node_count} nodes · {edge_count} edges · view-only React Flow"),
+        summary: format!("Imp graph · {node_count} nodes · {edge_count} edges"),
         graph: Some(graph),
         properties: vec![
             PropertyRow {

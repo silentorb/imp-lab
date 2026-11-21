@@ -1,5 +1,6 @@
 mod menu;
 mod open;
+mod save;
 
 use serde::Serialize;
 use tauri::Emitter;
@@ -28,7 +29,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ping,
             open::pick_and_open_document,
-            open::open_document_file
+            open::open_document_file,
+            save::save_document_file,
+            save::pick_and_save_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

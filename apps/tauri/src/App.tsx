@@ -14,6 +14,9 @@ import {
 } from "@mantine/core";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import type { Graph } from "imp-core-types";
+import { addImpNode } from "imp-graph-view";
+import { listNodeDefinitions } from "imp-registry";
 import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
   CMD_DOCUMENT_NEW_GRAPH,
@@ -30,8 +33,21 @@ import {
   type DocumentSummaryDto,
   type EditorDocument,
 } from "./documents";
-import { ImpGraphCanvas } from "./ImpGraphCanvas";
+import { GraphErrorBoundary } from "./GraphErrorBoundary";
+import { LabGraphPanel } from "./LabGraphPanel";
+import { labRegistry } from "./registry";
 import classes from "./App.module.css";
+
+function summarizeGraph(graph: Graph): string {
+  const nodeCount = Object.keys(graph.nodes).length;
+  const edgeCount = Object.keys(graph.edges).length;
+  return `Imp graph · ${nodeCount} nodes · ${edgeCount} edges`;
+}
+
+type SaveResult = {
+  origin: string;
+  title: string;
+};
 
 export default function App() {
   const { colorScheme, setColorScheme, toggleColorScheme } =
@@ -39,13 +55,35 @@ export default function App() {
   const [documents, setDocuments] = useState<EditorDocument[]>([]);
   const [activeId, setActiveId] = useState("");
   const [status, setStatus] = useState(
-    "Prototype · Open File… bridged · Imp graphs view-only",
+    "Prototype · Open / Save bridged · Imp graphs editable",
   );
+
+  const paletteTypes = useMemo(() => {
+    const ids = new Set(
+      listNodeDefinitions(labRegistry).map((definition) => definition.id),
+    );
+    return [...ids].sort();
+  }, []);
 
   const active = useMemo(
     () => documents.find((doc) => doc.id === activeId) ?? documents[0],
     [documents, activeId],
   );
+
+  const updateDocGraph = useCallback((docId: string, graph: Graph) => {
+    setDocuments((prev) =>
+      prev.map((doc) =>
+        doc.id === docId
+          ? {
+              ...doc,
+              graph,
+              dirty: true,
+              summary: summarizeGraph(graph),
+            }
+          : doc,
+      ),
+    );
+  }, []);
 
   const openFile = useCallback(async () => {
     try {
@@ -78,6 +116,53 @@ export default function App() {
     }
   }, []);
 
+  const saveActive = useCallback(async () => {
+    const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+    if (!doc?.graph) {
+      setStatus("Nothing to save");
+      return;
+    }
+    try {
+      const payload = { graph: doc.graph, path: doc.origin };
+      const needsSaveAs =
+        !doc.origin || doc.origin === "untitled" || doc.origin.startsWith("untitled");
+      const result = needsSaveAs
+        ? await invoke<SaveResult | null>("pick_and_save_document", { payload })
+        : await invoke<SaveResult>("save_document_file", { payload });
+      if (!result) {
+        setStatus("Save cancelled");
+        return;
+      }
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.id === doc.id
+            ? {
+                ...d,
+                dirty: false,
+                origin: result.origin,
+                title: result.title,
+                id: result.origin,
+                properties: d.properties.map((row) => {
+                  if (row.label === "Path") {
+                    return { ...row, value: result.origin };
+                  }
+                  if (row.label === "Title") {
+                    return { ...row, value: result.title };
+                  }
+                  return row;
+                }),
+              }
+            : d,
+        ),
+      );
+      setActiveId(result.origin);
+      setStatus(`Saved · ${result.title}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatus(`Save failed · ${message}`);
+    }
+  }, [activeId, documents]);
+
   const closeActive = useCallback(() => {
     setDocuments((prev) => {
       if (prev.length === 0) {
@@ -95,6 +180,20 @@ export default function App() {
     });
   }, [activeId]);
 
+  const addNodeToActive = useCallback(
+    (typeId: string) => {
+      const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+      if (!doc) {
+        setStatus("Open or create a graph first");
+        return;
+      }
+      const next = addImpNode(doc.graph ?? emptyImpGraph(), typeId);
+      updateDocGraph(doc.id, next);
+      setStatus(`Added · ${typeId}`);
+    },
+    [activeId, documents, updateDocGraph],
+  );
+
   const dispatchCommand = useCallback(
     (id: string) => {
       switch (id) {
@@ -102,7 +201,7 @@ export default function App() {
           void openFile();
           break;
         case CMD_DOCUMENT_SAVE:
-          setStatus("Save deferred — editable models not hosted yet");
+          void saveActive();
           break;
         case CMD_DOCUMENT_NEW_GRAPH: {
           const doc = newUntitledDocument("imp-graph");
@@ -122,7 +221,7 @@ export default function App() {
           break;
       }
     },
-    [closeActive, openFile, toggleColorScheme],
+    [closeActive, openFile, saveActive, toggleColorScheme],
   );
 
   useEffect(() => {
@@ -183,12 +282,31 @@ export default function App() {
             >
               Open…
             </Button>
+            <Button
+              variant="default"
+              onClick={() => dispatchCommand(CMD_DOCUMENT_SAVE)}
+            >
+              Save
+            </Button>
           </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Aside className={classes.aside} p="sm">
         <Stack gap="xs">
+          <Title order={6}>Add node</Title>
+          <Group gap={6}>
+            {paletteTypes.map((typeId) => (
+              <Button
+                key={typeId}
+                size="compact-xs"
+                variant="light"
+                onClick={() => addNodeToActive(typeId)}
+              >
+                {typeId}
+              </Button>
+            ))}
+          </Group>
           <Title order={6}>Properties</Title>
           {active ? (
             <Stack gap={4}>
@@ -210,7 +328,7 @@ export default function App() {
             </Stack>
           ) : (
             <Text size="xs" c="dimmed">
-              No selection
+              No document
             </Text>
           )}
         </Stack>
@@ -264,7 +382,12 @@ export default function App() {
                   </Title>
                   <Text size="sm">{doc.summary}</Text>
                   <Box className={classes.canvas}>
-                    <ImpGraphCanvas graph={doc.graph ?? emptyImpGraph()} />
+                    <GraphErrorBoundary resetKey={doc.id}>
+                      <LabGraphPanel
+                        graph={doc.graph ?? emptyImpGraph()}
+                        onGraphChange={(graph) => updateDocGraph(doc.id, graph)}
+                      />
+                    </GraphErrorBoundary>
                   </Box>
                 </Box>
               </Tabs.Panel>
@@ -279,7 +402,7 @@ export default function App() {
             {status}
           </Text>
           <Text size="xs" c="dimmed">
-            view-only
+            {active?.dirty ? "dirty" : "saved"}
           </Text>
         </Group>
       </AppShell.Footer>

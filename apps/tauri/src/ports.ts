@@ -1,29 +1,18 @@
 import type { Edge } from "@xyflow/react";
 import type { NodeTypeId } from "imp-core-types";
+import {
+  inferPortsFromEdges,
+  type CatalogInputPort,
+  type CatalogOutputPort,
+} from "imp-graph-view";
 import { getNodeDefinition, type Registry } from "imp-registry";
 
 export type PortLists = {
-  inputPorts: string[];
-  outputPorts: string[];
+  inputs: CatalogInputPort[];
+  outputs: CatalogOutputPort[];
 };
 
-/** Unique non-empty handle ids from edges incident on `nodeId`. */
-export function inferPortsFromEdges(nodeId: string, edges: Edge[]): PortLists {
-  const inputs = new Set<string>();
-  const outputs = new Set<string>();
-  for (const edge of edges) {
-    if (edge.target === nodeId && edge.targetHandle) {
-      inputs.add(edge.targetHandle);
-    }
-    if (edge.source === nodeId && edge.sourceHandle) {
-      outputs.add(edge.sourceHandle);
-    }
-  }
-  return {
-    inputPorts: [...inputs],
-    outputPorts: [...outputs],
-  };
-}
+export { inferPortsFromEdges };
 
 /** Prefer catalog ports; fall back to edge-inferred handles for unknown types. */
 export function resolvePorts(
@@ -38,8 +27,13 @@ export function resolvePorts(
       : undefined;
   if (definition) {
     return {
-      inputPorts: Object.keys(definition.inputs),
-      outputPorts: Object.keys(definition.outputs),
+      inputs: Object.values(definition.inputs).map((port) => ({
+        id: port.id,
+        variadic: port.variadic === true,
+      })),
+      outputs: Object.values(definition.outputs).map((port) => ({
+        id: port.id,
+      })),
     };
   }
   return inferPortsFromEdges(nodeId, edges);

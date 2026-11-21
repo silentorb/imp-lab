@@ -48,7 +48,7 @@ export function newUntitledDocument(kind: DocumentKind = "imp-graph"): EditorDoc
     kind,
     origin: "untitled",
     dirty: true,
-    summary: "Untitled Imp graph · empty · view-only React Flow",
+    summary: "Untitled Imp graph · empty",
     properties: [
       { label: "Id", value: id },
       { label: "Type", value: kind },
