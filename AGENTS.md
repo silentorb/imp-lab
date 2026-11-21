@@ -18,7 +18,13 @@ This repo must not depend on Aura (`aura_*`) crates. Product hosts compose lab c
 | `crates/imp_documents/` | Backend | Multi-document session store with host-defined payloads |
 | `crates/imp_graph_editor/` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, layout, edit helpers, chrome widgets) |
 | `crates/imp_lab_extensions/` | Backend | Tome-shaped optional `extensions.json` parse + dynamically linked extension loading (`imp-catalog`, `command`, `menu-item`, `service`) |
-| `apps/tauri/` | Frontend (Tauri) | Experimental Imp desktop shell; Open/Save bridged; editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports, Add palette, selected-node Title + input literals in Properties, on-node literal fields); Aura JSON `notation` documents with piano-roll editor (tools/snap/playhead); Edit Undo/Redo for Imp + notation history; host ELK layered LR layout; optional Aura catalogs + playback (Play menu / Space toggle; graphs and notation tips) via Lab pack / `extensions.json` (no Aura crate dep); Simple mode deferred |
+| `apps/tauri/` | Frontend (Tauri) | Experimental Imp desktop shell; Open/Save bridged; editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports, Add palette, selected-node Title + input literals in Properties, on-node literal fields); Aura JSON `notation` documents with piano-roll editor (tools/snap/playhead); Edit Undo/Redo for Imp + notation history; host ELK layered LR layout; configurable input bindings (JSON → commands; menus derive native accelerators); optional Aura catalogs + playback (Play menu / Space toggle; graphs and notation tips) via Lab pack / `extensions.json` (no Aura crate dep); Simple mode deferred |
+
+### Input bindings (Tauri)
+
+Lab follows the **VS Code menubar + keybinding** model: a central bindings table owns chords; native menus derive `.accelerator()` from that table; webview keydown resolves the same table. Detail: [`docs/features/input-bindings.md`](docs/features/input-bindings.md).
+
+**Tauri/muda gap vs Electron (compromise today):** Electron can `registerAccelerator: false` (show shortcut without OS registration) and expose `triggeredByAccelerator` so accelerator activations replay into the keybinding service. muda/Tauri do not yet ([muda#393](https://github.com/tauri-apps/muda/issues/393), [tauri#15909](https://github.com/tauri-apps/tauri/issues/15909)). When those land, adopt them; do **not** redesign around label-suffix fake accelerators.
 
 ## Commands
 
@@ -51,6 +57,7 @@ Repos and projects use **kebab-case** (`imp-lab`). Rust crates use **snake_case*
 
 - [`docs/rust-style.md`](docs/rust-style.md) — Rust conventions (links to imp-rs)
 - [`docs/features/extensions.md`](docs/features/extensions.md) — optional Tome-shaped extensions (`libraryPath` + `clientModule`)
+- [`docs/features/input-bindings.md`](docs/features/input-bindings.md) — configurable keyboard → command bindings (Tauri host)
 - [imp-rs](https://github.com/silentorb/imp-rs) — Imp core types and runtime crates
 - [imp-spec](https://github.com/silentorb/imp-spec) — language-neutral Imp specs
 - [imp-graph-view](https://github.com/silentorb/imp-graph-view) — Imp ↔ React Flow converters (Tauri shell)

@@ -20,7 +20,7 @@ GUI and non-GUI concerns live in the same repository for now (separate crates / 
 | `imp_documents` | Backend | Multi-document session store (tabs, paths, dirty/lifecycle) with host-defined payloads |
 | `imp_lab_extensions` | Backend | Optional Tome-shaped `extensions.json` + dynamic library loading (`imp-catalog`) |
 | `imp_graph_editor` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, edit helpers, chrome widgets) |
-| `apps/tauri` | Frontend (Tauri) | Experimental Imp desktop shell (`imp-lab-tauri`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView`; Edit Undo/Redo; host ELK LR layout; optional catalogs via Lab pack; Simple mode deferred |
+| `apps/tauri` | Frontend (Tauri) | Experimental Imp desktop shell (`imp-lab-tauri`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView`; Edit Undo/Redo; configurable input bindings (menus derive accelerators); host ELK LR layout; optional catalogs via Lab pack; Simple mode deferred |
 
 The Tauri host loads optional packs (e.g. Aura audio catalogs) without compile-time Aura deps.
 

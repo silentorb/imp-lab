@@ -33,6 +33,10 @@ import {
   type Registry,
 } from "imp-registry";
 import {
+  resolveKeyEvent,
+  type BindingDto,
+} from "./bindings";
+import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
   CMD_DOCUMENT_NEW_GRAPH,
   CMD_DOCUMENT_NEW_NOTATION,
@@ -45,7 +49,6 @@ import {
   CMD_NOTATION_TOOL_DRAW,
   CMD_NOTATION_TOOL_ERASE,
   CMD_NOTATION_TOOL_SELECT,
-  CMD_PLAY_TOGGLE,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
   type EditorCommandPayload,
@@ -195,6 +198,9 @@ export default function App() {
   );
   const extensionCommandIdsRef = useRef(extensionCommandIds);
   extensionCommandIdsRef.current = extensionCommandIds;
+  const [inputBindings, setInputBindings] = useState<BindingDto[]>([]);
+  const inputBindingsRef = useRef(inputBindings);
+  inputBindingsRef.current = inputBindings;
 
   useEffect(() => {
     let cancelled = false;
@@ -227,6 +233,25 @@ export default function App() {
         }
       } catch (err) {
         console.warn("get_extensions_load failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const dto = await invoke<{ bindings: BindingDto[] }>(
+          "get_input_bindings",
+        );
+        if (!cancelled) {
+          setInputBindings(dto.bindings ?? []);
+        }
+      } catch (err) {
+        console.warn("get_input_bindings failed", err);
       }
     })();
     return () => {
@@ -919,39 +944,22 @@ export default function App() {
     };
   }, [dispatchCommand]);
 
+  // Keydown owns chord → command resolve (bindings table). Menu clicks / OS
+  // accelerators still emit editor://command for the same ids.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) {
+        return;
+      }
       if (isTextEditingTarget(document.activeElement)) {
         return;
       }
-      if (event.code === "Space" || event.key === " ") {
-        if (event.ctrlKey || event.metaKey || event.altKey) {
-          return;
-        }
-        if (!extensionCommandIdsRef.current.has(CMD_PLAY_TOGGLE)) {
-          return;
-        }
-        event.preventDefault();
-        dispatchCommand(CMD_PLAY_TOGGLE);
+      const command = resolveKeyEvent(event, inputBindingsRef.current);
+      if (!command) {
         return;
       }
-      if (event.ctrlKey || event.metaKey || event.altKey) {
-        return;
-      }
-      const key = event.key.toLowerCase();
-      if (key === "d") {
-        event.preventDefault();
-        dispatchCommand(CMD_NOTATION_TOOL_DRAW);
-      } else if (key === "s") {
-        event.preventDefault();
-        dispatchCommand(CMD_NOTATION_TOOL_SELECT);
-      } else if (key === "e") {
-        event.preventDefault();
-        dispatchCommand(CMD_NOTATION_TOOL_ERASE);
-      } else if (key === "n") {
-        event.preventDefault();
-        dispatchCommand(CMD_NOTATION_SNAP_TOGGLE);
-      }
+      event.preventDefault();
+      dispatchCommand(command);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

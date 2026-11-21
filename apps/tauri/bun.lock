@@ -114,21 +114,6 @@
         "typescript": "5.8.2",
       },
     },
-    "../../../imp-ts/packages/imp-react-flow": {
-      "name": "imp-react-flow",
-      "version": "0.5.0",
-      "dependencies": {
-        "imp-core-types": "workspace:^0.5.0",
-      },
-      "devDependencies": {
-        "@xyflow/react": "^12.8.2",
-        "imp-registry": "workspace:^0.5.0",
-        "typescript": "5.8.2",
-      },
-      "peerDependencies": {
-        "@xyflow/react": "^12.0.0",
-      },
-    },
     "../../../imp-ts/packages/imp-registry": {
       "name": "imp-registry",
       "version": "0.5.0",
@@ -469,8 +454,6 @@
 
     "imp-pathing": ["imp-pathing@workspace:../../../imp-ts/packages/imp-pathing"],
 
-    "imp-react-flow": ["imp-react-flow@workspace:../../../imp-ts/packages/imp-react-flow"],
-
     "imp-registry": ["imp-registry@workspace:../../../imp-ts/packages/imp-registry"],
 
     "imp-sql": ["imp-sql@workspace:../../../imp-ts/packages/imp-sql"],
@@ -570,8 +553,6 @@
     "imp-graph-view/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 
     "imp-pathing/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
-
-    "imp-react-flow/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 
     "imp-registry/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 

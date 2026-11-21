@@ -1,3 +1,4 @@
+mod bindings;
 mod extensions;
 mod menu;
 mod open;
@@ -35,6 +36,8 @@ pub fn run() {
             loaded.result.contributions.command_ids.len()
         );
     }
+    // Bindings after extensions so extension command ids are known.
+    let _ = bindings::ensure_loaded(&loaded.result.contributions.command_ids);
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -51,6 +54,7 @@ pub fn run() {
             open::open_document_file,
             save::save_document_file,
             save::pick_and_save_document,
+            bindings::get_input_bindings,
             extensions::get_extensions_load,
             extensions::load_extensions_file,
             extensions::run_extension_command,
