@@ -34,10 +34,23 @@ import {
   CMD_DOCUMENT_OPEN_FILE,
   CMD_DOCUMENT_SAVE,
   CMD_DOCUMENT_SAVE_AS,
+  CMD_EDIT_REDO,
+  CMD_EDIT_UNDO,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
   type EditorCommandPayload,
 } from "./commands";
+import {
+  canRedo,
+  canUndo,
+  createHistory,
+  isDirty,
+  markSaved,
+  push,
+  redo,
+  undo,
+  type GraphHistory,
+} from "./documentHistory";
 import {
   documentFromDto,
   emptyImpGraph,
@@ -56,6 +69,25 @@ function summarizeGraph(graph: Graph): string {
   return `Imp graph · ${nodeCount} nodes · ${edgeCount} edges`;
 }
 
+function isUntitledOrigin(origin: string): boolean {
+  return !origin || origin === "untitled" || origin.startsWith("untitled");
+}
+
+function isTextEditingTarget(el: Element | null): boolean {
+  if (!el || !(el instanceof HTMLElement)) {
+    return false;
+  }
+  if (el.isContentEditable) {
+    return true;
+  }
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
+}
+
+function documentDirty(history: GraphHistory, origin: string): boolean {
+  return isDirty(history) || isUntitledOrigin(origin);
+}
+
 type SaveResult = {
   origin: string;
   title: string;
@@ -65,6 +97,13 @@ export default function App() {
   const { colorScheme, setColorScheme, toggleColorScheme } =
     useMantineColorScheme();
   const [documents, setDocuments] = useState<EditorDocument[]>([]);
+  const [histories, setHistories] = useState<Record<string, GraphHistory>>(
+    {},
+  );
+  const documentsRef = useRef(documents);
+  documentsRef.current = documents;
+  const historiesRef = useRef(histories);
+  historiesRef.current = histories;
   const [activeId, setActiveId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
@@ -127,20 +166,35 @@ export default function App() {
     );
   }, [selectedDefinition]);
 
-  const updateDocGraph = useCallback((docId: string, graph: Graph) => {
-    setDocuments((prev) =>
-      prev.map((doc) =>
-        doc.id === docId
-          ? {
-              ...doc,
-              graph,
-              dirty: true,
-              summary: summarizeGraph(graph),
-            }
-          : doc,
-      ),
-    );
-  }, []);
+  const syncDocFromHistory = useCallback(
+    (docId: string, history: GraphHistory) => {
+      setHistories((prev) => ({ ...prev, [docId]: history }));
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.id === docId
+            ? {
+                ...doc,
+                graph: history.present,
+                dirty: documentDirty(history, doc.origin),
+                summary: summarizeGraph(history.present),
+              }
+            : doc,
+        ),
+      );
+    },
+    [],
+  );
+
+  const updateDocGraph = useCallback(
+    (docId: string, graph: Graph, coalesceKey?: string) => {
+      const baseline =
+        documentsRef.current.find((d) => d.id === docId)?.graph ??
+        emptyImpGraph();
+      const current = historiesRef.current[docId] ?? createHistory(baseline);
+      syncDocFromHistory(docId, push(current, graph, coalesceKey));
+    },
+    [syncDocFromHistory],
+  );
 
   const clearTitleCommitTimer = useCallback(() => {
     if (titleCommitTimer.current != null) {
@@ -163,7 +217,7 @@ export default function App() {
       if (next === doc.graph) {
         return;
       }
-      updateDocGraph(doc.id, next);
+      updateDocGraph(doc.id, next, `title:${doc.id}:${selectedNodeId}`);
     },
     [
       activeId,
@@ -203,7 +257,11 @@ export default function App() {
       if (next === doc.graph) {
         return;
       }
-      updateDocGraph(doc.id, next);
+      updateDocGraph(
+        doc.id,
+        next,
+        `literal:${doc.id}:${selectedNodeId}:${portId}`,
+      );
     },
     [activeId, documents, selectedNodeId, updateDocGraph],
   );
@@ -249,6 +307,10 @@ export default function App() {
         return;
       }
       setDocuments((prev) => [...prev, doc]);
+      setHistories((prev) => ({
+        ...prev,
+        [doc.id]: createHistory(doc.graph ?? emptyImpGraph()),
+      }));
       setActiveId(doc.id);
       setStatus(`Opened · ${doc.title}`);
     } catch (err) {
@@ -258,6 +320,14 @@ export default function App() {
   }, [documents]);
 
   const applySaveResult = useCallback((docId: string, result: SaveResult) => {
+    setHistories((prev) => {
+      const current = prev[docId];
+      if (!current) {
+        return prev;
+      }
+      const { [docId]: _removed, ...rest } = prev;
+      return { ...rest, [result.origin]: markSaved(current) };
+    });
     setDocuments((prev) =>
       prev.map((d) =>
         d.id === docId
@@ -344,12 +414,59 @@ export default function App() {
       const next = prev.filter((d) => d.id !== currentId);
       const nextActive = next[0]?.id ?? "";
       queueMicrotask(() => {
+        setHistories((h) => {
+          if (!currentId || !(currentId in h)) {
+            return h;
+          }
+          const { [currentId]: _removed, ...rest } = h;
+          return rest;
+        });
         setActiveId(nextActive);
         setStatus(next.length ? "Closed tab" : "Closed last tab");
       });
       return next;
     });
   }, [activeId]);
+
+  const undoActive = useCallback(() => {
+    if (isTextEditingTarget(document.activeElement)) {
+      document.execCommand("undo");
+      return;
+    }
+    const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+    if (!doc) {
+      setStatus("Nothing to undo");
+      return;
+    }
+    const history = histories[doc.id];
+    if (!history || !canUndo(history)) {
+      setStatus("Nothing to undo");
+      return;
+    }
+    const next = undo(history);
+    syncDocFromHistory(doc.id, next);
+    setStatus("Undo");
+  }, [activeId, documents, histories, syncDocFromHistory]);
+
+  const redoActive = useCallback(() => {
+    if (isTextEditingTarget(document.activeElement)) {
+      document.execCommand("redo");
+      return;
+    }
+    const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+    if (!doc) {
+      setStatus("Nothing to redo");
+      return;
+    }
+    const history = histories[doc.id];
+    if (!history || !canRedo(history)) {
+      setStatus("Nothing to redo");
+      return;
+    }
+    const next = redo(history);
+    syncDocFromHistory(doc.id, next);
+    setStatus("Redo");
+  }, [activeId, documents, histories, syncDocFromHistory]);
 
   const addNodeToActive = useCallback(
     (typeId: string) => {
@@ -380,12 +497,22 @@ export default function App() {
         case CMD_DOCUMENT_NEW_GRAPH: {
           const doc = newUntitledDocument("imp-graph");
           setDocuments((prev) => [...prev, doc]);
+          setHistories((prev) => ({
+            ...prev,
+            [doc.id]: createHistory(doc.graph ?? emptyImpGraph()),
+          }));
           setActiveId(doc.id);
           setStatus(`New graph · ${doc.title}`);
           break;
         }
         case CMD_DOCUMENT_CLOSE_ACTIVE:
           closeActive();
+          break;
+        case CMD_EDIT_UNDO:
+          undoActive();
+          break;
+        case CMD_EDIT_REDO:
+          redoActive();
           break;
         case CMD_VIEW_TOGGLE_COLOR_SCHEME:
           toggleColorScheme();
@@ -395,7 +522,15 @@ export default function App() {
           break;
       }
     },
-    [closeActive, openFile, saveActive, saveActiveAs, toggleColorScheme],
+    [
+      closeActive,
+      openFile,
+      redoActive,
+      saveActive,
+      saveActiveAs,
+      toggleColorScheme,
+      undoActive,
+    ],
   );
 
   useEffect(() => {
@@ -672,6 +807,7 @@ export default function App() {
                     <GraphErrorBoundary resetKey={doc.id}>
                       <LabGraphPanel
                         graph={doc.graph ?? emptyImpGraph()}
+                        fitViewKey={doc.id}
                         onGraphChange={(graph) => updateDocGraph(doc.id, graph)}
                         onSelectionChange={
                           doc.id === (activeId || documents[0]?.id)

@@ -19,7 +19,7 @@ GUI and non-GUI concerns live in the same repository for now (separate crates / 
 | --- | --- | --- |
 | `imp_documents` | Backend | Multi-document session store (tabs, paths, dirty/lifecycle) with host-defined payloads |
 | `imp_graph_editor` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, edit helpers, chrome widgets) |
-| `apps/tauri` | Frontend (Tauri) | Experimental Imp desktop shell (`imp-lab-tauri`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports + Add + selected-node Title + input literals on-node and in Properties); host ELK LR layout; Aura catalogs not loaded; Simple mode deferred |
+| `apps/tauri` | Frontend (Tauri) | Experimental Imp desktop shell (`imp-lab-tauri`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports + Add + selected-node Title + input literals on-node and in Properties); Edit Undo/Redo for Imp document history; host ELK LR layout; Aura catalogs not loaded; Simple mode deferred |
 
 Iced shell/extension-framework extract from Aura Editor remains future work. The Tauri app is a separate experimental host, not that extract.
 

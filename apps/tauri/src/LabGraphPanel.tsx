@@ -20,12 +20,15 @@ type LabGraphPanelProps = {
   graph: Graph;
   onGraphChange: (graph: Graph) => void;
   onSelectionChange?: (selection: GraphSelection) => void;
+  /** Stable per document tab — fits once on open, not on every topology edit. */
+  fitViewKey?: string;
 };
 
 export function LabGraphPanel({
   graph,
   onGraphChange,
   onSelectionChange,
+  fitViewKey,
 }: LabGraphPanelProps) {
   const { colorScheme } = useMantineColorScheme();
   const [layout, setLayout] = useState<Map<string, LayoutBox>>(new Map());
@@ -106,6 +109,7 @@ export function LabGraphPanel({
         layout={layout}
         nodesDraggable={false}
         colorMode={rfColorMode}
+        fitViewKey={fitViewKey}
         className={classes.flow}
       />
     </div>

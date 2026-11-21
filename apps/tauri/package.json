@@ -12,7 +12,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "bun test src/layoutGraph.test.ts",
+    "test": "bun test src/layoutGraph.test.ts src/documentHistory.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

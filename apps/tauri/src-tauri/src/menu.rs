@@ -2,7 +2,7 @@
 //!
 //! Clicks emit `editor://command` for the React shell to handle.
 
-use tauri::menu::{Menu, MenuBuilder, SubmenuBuilder};
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{AppHandle, Runtime};
 
 const CMD_DOCUMENT_OPEN_FILE: &str = "document.open-file";
@@ -10,6 +10,8 @@ const CMD_DOCUMENT_NEW_GRAPH: &str = "document.new.graph";
 const CMD_DOCUMENT_SAVE: &str = "document.save";
 const CMD_DOCUMENT_SAVE_AS: &str = "document.save-as";
 const CMD_DOCUMENT_CLOSE_ACTIVE: &str = "document.close_active";
+const CMD_EDIT_UNDO: &str = "edit.undo";
+const CMD_EDIT_REDO: &str = "edit.redo";
 const CMD_VIEW_TOGGLE_COLOR_SCHEME: &str = "view.toggle-color-scheme";
 
 /// Builds the global File / Edit / View menu bar.
@@ -22,7 +24,16 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .text(CMD_DOCUMENT_CLOSE_ACTIVE, "Close")
         .build()?;
 
-    let edit = SubmenuBuilder::new(app, "Edit").build()?;
+    let undo = MenuItemBuilder::with_id(CMD_EDIT_UNDO, "Undo")
+        .accelerator("CmdOrCtrl+Z")
+        .build(app)?;
+    let redo = MenuItemBuilder::with_id(CMD_EDIT_REDO, "Redo")
+        .accelerator("CmdOrCtrl+Shift+Z")
+        .build(app)?;
+    let edit = SubmenuBuilder::new(app, "Edit")
+        .item(&undo)
+        .item(&redo)
+        .build()?;
 
     let view = SubmenuBuilder::new(app, "View")
         .text(CMD_VIEW_TOGGLE_COLOR_SCHEME, "Toggle light/dark")
