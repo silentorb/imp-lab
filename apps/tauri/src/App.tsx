@@ -22,6 +22,7 @@ import {
   CMD_DOCUMENT_NEW_GRAPH,
   CMD_DOCUMENT_OPEN_FILE,
   CMD_DOCUMENT_SAVE,
+  CMD_DOCUMENT_SAVE_AS,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
   type EditorCommandPayload,
@@ -111,6 +112,33 @@ export default function App() {
     }
   }, [documents]);
 
+  const applySaveResult = useCallback((docId: string, result: SaveResult) => {
+    setDocuments((prev) =>
+      prev.map((d) =>
+        d.id === docId
+          ? {
+              ...d,
+              dirty: false,
+              origin: result.origin,
+              title: result.title,
+              id: result.origin,
+              properties: d.properties.map((row) => {
+                if (row.label === "Path") {
+                  return { ...row, value: result.origin };
+                }
+                if (row.label === "Title") {
+                  return { ...row, value: result.title };
+                }
+                return row;
+              }),
+            }
+          : d,
+      ),
+    );
+    setActiveId(result.origin);
+    setStatus(`Saved · ${result.title}`);
+  }, []);
+
   const saveActive = useCallback(async () => {
     const doc = documents.find((d) => d.id === activeId) ?? documents[0];
     if (!doc?.graph) {
@@ -120,43 +148,46 @@ export default function App() {
     try {
       const payload = { graph: doc.graph, path: doc.origin };
       const needsSaveAs =
-        !doc.origin || doc.origin === "untitled" || doc.origin.startsWith("untitled");
+        !doc.origin ||
+        doc.origin === "untitled" ||
+        doc.origin.startsWith("untitled");
       const result = needsSaveAs
-        ? await invoke<SaveResult | null>("pick_and_save_document", { payload })
+        ? await invoke<SaveResult | null>("pick_and_save_document", {
+            payload,
+          })
         : await invoke<SaveResult>("save_document_file", { payload });
       if (!result) {
         setStatus("Save cancelled");
         return;
       }
-      setDocuments((prev) =>
-        prev.map((d) =>
-          d.id === doc.id
-            ? {
-                ...d,
-                dirty: false,
-                origin: result.origin,
-                title: result.title,
-                id: result.origin,
-                properties: d.properties.map((row) => {
-                  if (row.label === "Path") {
-                    return { ...row, value: result.origin };
-                  }
-                  if (row.label === "Title") {
-                    return { ...row, value: result.title };
-                  }
-                  return row;
-                }),
-              }
-            : d,
-        ),
-      );
-      setActiveId(result.origin);
-      setStatus(`Saved · ${result.title}`);
+      applySaveResult(doc.id, result);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setStatus(`Save failed · ${message}`);
     }
-  }, [activeId, documents]);
+  }, [activeId, applySaveResult, documents]);
+
+  const saveActiveAs = useCallback(async () => {
+    const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+    if (!doc?.graph) {
+      setStatus("Nothing to save");
+      return;
+    }
+    try {
+      const payload = { graph: doc.graph, path: doc.origin };
+      const result = await invoke<SaveResult | null>("pick_and_save_document", {
+        payload,
+      });
+      if (!result) {
+        setStatus("Save cancelled");
+        return;
+      }
+      applySaveResult(doc.id, result);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setStatus(`Save failed · ${message}`);
+    }
+  }, [activeId, applySaveResult, documents]);
 
   const closeActive = useCallback(() => {
     setDocuments((prev) => {
@@ -198,6 +229,9 @@ export default function App() {
         case CMD_DOCUMENT_SAVE:
           void saveActive();
           break;
+        case CMD_DOCUMENT_SAVE_AS:
+          void saveActiveAs();
+          break;
         case CMD_DOCUMENT_NEW_GRAPH: {
           const doc = newUntitledDocument("imp-graph");
           setDocuments((prev) => [...prev, doc]);
@@ -216,7 +250,7 @@ export default function App() {
           break;
       }
     },
-    [closeActive, openFile, saveActive, toggleColorScheme],
+    [closeActive, openFile, saveActive, saveActiveAs, toggleColorScheme],
   );
 
   useEffect(() => {
@@ -339,12 +373,6 @@ export default function App() {
               <Text size="xs" c="dimmed" ta="center">
                 File → Open File… or New graph
               </Text>
-              <Button
-                variant="default"
-                onClick={() => dispatchCommand(CMD_DOCUMENT_OPEN_FILE)}
-              >
-                Open File…
-              </Button>
             </Stack>
           </Box>
         ) : (
