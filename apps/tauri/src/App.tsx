@@ -95,26 +95,21 @@ export default function App() {
         return;
       }
       const doc = documentFromDto(result);
-      setDocuments((prev) => {
-        const existing = prev.find((d) => d.origin === doc.origin);
-        if (existing) {
-          queueMicrotask(() => {
-            setActiveId(existing.id);
-            setStatus(`Activated · ${existing.title}`);
-          });
-          return prev;
-        }
-        queueMicrotask(() => {
-          setActiveId(doc.id);
-          setStatus(`Opened · ${doc.title}`);
-        });
-        return [...prev, doc];
-      });
+      const existing = documents.find((d) => d.origin === doc.origin);
+      if (existing) {
+        // Activate in the same turn so the graph pane is not 0x0 during fitView.
+        setActiveId(existing.id);
+        setStatus(`Activated · ${existing.title}`);
+        return;
+      }
+      setDocuments((prev) => [...prev, doc]);
+      setActiveId(doc.id);
+      setStatus(`Opened · ${doc.title}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setStatus(`Open failed · ${message}`);
     }
-  }, []);
+  }, [documents]);
 
   const saveActive = useCallback(async () => {
     const doc = documents.find((d) => d.id === activeId) ?? documents[0];
