@@ -4,6 +4,7 @@ import type { Edge } from "@xyflow/react";
 import type { Graph } from "imp-core-types";
 import {
   ImpGraphView,
+  type GraphSelection,
   type LayoutBox,
   type ResolvePorts,
 } from "imp-graph-view";
@@ -18,9 +19,14 @@ import classes from "./LabGraphPanel.module.css";
 type LabGraphPanelProps = {
   graph: Graph;
   onGraphChange: (graph: Graph) => void;
+  onSelectionChange?: (selection: GraphSelection) => void;
 };
 
-export function LabGraphPanel({ graph, onGraphChange }: LabGraphPanelProps) {
+export function LabGraphPanel({
+  graph,
+  onGraphChange,
+  onSelectionChange,
+}: LabGraphPanelProps) {
   const { colorScheme } = useMantineColorScheme();
   const [layout, setLayout] = useState<Map<string, LayoutBox>>(new Map());
 
@@ -91,6 +97,7 @@ export function LabGraphPanel({ graph, onGraphChange }: LabGraphPanelProps) {
       <ImpGraphView
         graph={graph}
         onGraphChange={onGraphChange}
+        onSelectionChange={onSelectionChange}
         resolvePorts={resolve}
         layout={layout}
         nodesDraggable={false}

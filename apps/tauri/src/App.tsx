@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppShell,
   Badge,
@@ -9,13 +9,14 @@ import {
   Stack,
   Tabs,
   Text,
+  TextInput,
   Title,
   useMantineColorScheme,
 } from "@mantine/core";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { Graph } from "imp-core-types";
-import { addImpNode } from "imp-graph-view";
+import { addImpNode, setNodeTitle, type GraphSelection } from "imp-graph-view";
 import { listNodeDefinitions } from "imp-registry";
 import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
@@ -55,6 +56,9 @@ export default function App() {
     useMantineColorScheme();
   const [documents, setDocuments] = useState<EditorDocument[]>([]);
   const [activeId, setActiveId] = useState("");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const titleCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState(
     "Prototype · Open / Save bridged · Imp graphs editable",
   );
@@ -71,6 +75,18 @@ export default function App() {
     [documents, activeId],
   );
 
+  const selectedLocalNode = useMemo(() => {
+    if (!selectedNodeId || !active?.graph) {
+      return null;
+    }
+    return active.graph.nodes[selectedNodeId] ?? null;
+  }, [active?.graph, selectedNodeId]);
+
+  const selectedIsMissing =
+    selectedNodeId != null &&
+    active?.graph != null &&
+    !(selectedNodeId in active.graph.nodes);
+
   const updateDocGraph = useCallback((docId: string, graph: Graph) => {
     setDocuments((prev) =>
       prev.map((doc) =>
@@ -85,6 +101,72 @@ export default function App() {
       ),
     );
   }, []);
+
+  const clearTitleCommitTimer = useCallback(() => {
+    if (titleCommitTimer.current != null) {
+      clearTimeout(titleCommitTimer.current);
+      titleCommitTimer.current = null;
+    }
+  }, []);
+
+  const commitSelectedTitle = useCallback(
+    (raw: string) => {
+      clearTitleCommitTimer();
+      const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+      if (!doc?.graph || !selectedNodeId) {
+        return;
+      }
+      if (!(selectedNodeId in doc.graph.nodes)) {
+        return;
+      }
+      const next = setNodeTitle(doc.graph, selectedNodeId, raw);
+      if (next === doc.graph) {
+        return;
+      }
+      updateDocGraph(doc.id, next);
+    },
+    [
+      activeId,
+      clearTitleCommitTimer,
+      documents,
+      selectedNodeId,
+      updateDocGraph,
+    ],
+  );
+
+  const scheduleTitleCommit = useCallback(
+    (raw: string) => {
+      clearTitleCommitTimer();
+      titleCommitTimer.current = setTimeout(() => {
+        titleCommitTimer.current = null;
+        commitSelectedTitle(raw);
+      }, 400);
+    },
+    [clearTitleCommitTimer, commitSelectedTitle],
+  );
+
+  const onGraphSelectionChange = useCallback(
+    (selection: GraphSelection) => {
+      clearTitleCommitTimer();
+      const nodeId =
+        selection.nodeIds.length === 1 ? (selection.nodeIds[0] ?? null) : null;
+      setSelectedNodeId(nodeId);
+      const doc = documents.find((d) => d.id === activeId) ?? documents[0];
+      const node = nodeId && doc?.graph ? doc.graph.nodes[nodeId] : undefined;
+      setTitleDraft(node?.title ?? "");
+    },
+    [activeId, clearTitleCommitTimer, documents],
+  );
+
+  useEffect(() => {
+    clearTitleCommitTimer();
+    setSelectedNodeId(null);
+    setTitleDraft("");
+  }, [activeId, clearTitleCommitTimer]);
+
+  useEffect(() => {
+    return () => clearTitleCommitTimer();
+  }, [clearTitleCommitTimer]);
 
   const openFile = useCallback(async () => {
     try {
@@ -337,8 +419,81 @@ export default function App() {
             ))}
           </Group>
           <Title order={6}>Properties</Title>
-          {active ? (
+          {!active ? (
+            <Text size="xs" c="dimmed">
+              No document
+            </Text>
+          ) : selectedLocalNode ? (
+            <Stack gap={6}>
+              <TextInput
+                size="xs"
+                label="Title"
+                value={titleDraft}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setTitleDraft(value);
+                  scheduleTitleCommit(value);
+                }}
+                onBlur={() => commitSelectedTitle(titleDraft)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitSelectedTitle(titleDraft);
+                  }
+                }}
+              />
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="xs" c="dimmed">
+                  Id
+                </Text>
+                <Text size="xs" ta="right" lineClamp={1}>
+                  {selectedLocalNode.id}
+                </Text>
+              </Group>
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="xs" c="dimmed">
+                  Type
+                </Text>
+                <Text size="xs" ta="right" lineClamp={1}>
+                  {selectedLocalNode.type}
+                </Text>
+              </Group>
+            </Stack>
+          ) : selectedIsMissing ? (
+            <Stack gap={6}>
+              <TextInput
+                size="xs"
+                label="Title"
+                value=""
+                disabled
+                placeholder="(missing)"
+              />
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="xs" c="dimmed">
+                  Id
+                </Text>
+                <Text size="xs" ta="right" lineClamp={1}>
+                  {selectedNodeId}
+                </Text>
+              </Group>
+              <Group gap="xs" justify="space-between" wrap="nowrap">
+                <Text size="xs" c="dimmed">
+                  Type
+                </Text>
+                <Text size="xs" ta="right" lineClamp={1}>
+                  (missing)
+                </Text>
+              </Group>
+            </Stack>
+          ) : selectedNodeId ? (
+            <Text size="xs" c="dimmed">
+              Select a single node
+            </Text>
+          ) : (
             <Stack gap={4}>
+              <Text size="xs" c="dimmed">
+                Select a node…
+              </Text>
               {active.properties.map((row) => (
                 <Group
                   key={row.label}
@@ -355,10 +510,6 @@ export default function App() {
                 </Group>
               ))}
             </Stack>
-          ) : (
-            <Text size="xs" c="dimmed">
-              No document
-            </Text>
           )}
         </Stack>
       </AppShell.Aside>
@@ -409,6 +560,11 @@ export default function App() {
                       <LabGraphPanel
                         graph={doc.graph ?? emptyImpGraph()}
                         onGraphChange={(graph) => updateDocGraph(doc.id, graph)}
+                        onSelectionChange={
+                          doc.id === (activeId || documents[0]?.id)
+                            ? onGraphSelectionChange
+                            : undefined
+                        }
                       />
                     </GraphErrorBoundary>
                   </Box>
