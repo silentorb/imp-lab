@@ -25,6 +25,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 directories = "5"
 imp_lab_extensions = { path = "../../../crates/imp_lab_extensions" }
+# Data sources: projects are Tome configs; records are Tome nodes (sibling checkout).
+tome_db = { path = "../../../../tome-rust-server/crates/tome_db" }
+tome_flatfile = { path = "../../../../tome-rust-server/crates/tome_flatfile" }
+tome_graph_interfaces = { path = "../../../../tome-rust-server/crates/tome_graph_interfaces" }
+
+[dev-dependencies]
+tempfile = "3"
 
 # Enabled by `tauri build` / Windows cargo-xwin export. Without it, release
 # binaries still load build.devUrl (localhost) instead of embedded frontendDist.

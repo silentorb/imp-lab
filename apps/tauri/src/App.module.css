@@ -8,6 +8,14 @@
   background: var(--mantine-color-body);
 }
 
+.navbar {
+  border-right: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .aside {
   border-left: 1px solid var(--mantine-color-default-border);
   background: var(--mantine-color-body);

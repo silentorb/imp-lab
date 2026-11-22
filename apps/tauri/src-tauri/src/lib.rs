@@ -1,8 +1,10 @@
 mod bindings;
 mod extensions;
+mod lab_model;
 mod menu;
-mod open;
-mod save;
+mod project;
+mod records;
+pub mod seed;
 mod user_state;
 
 use std::sync::Mutex;
@@ -49,6 +51,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(store))
+        .manage(project::ProjectState::default())
         .menu(menu::build)
         .on_menu_event(|app, event| {
             let id = event.id().as_ref().to_string();
@@ -67,6 +70,7 @@ pub fn run() {
             if let Some(entry) = entry {
                 user_state::apply_window_entry(app.handle(), &entry);
             }
+            project::spawn_change_poller(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -74,10 +78,20 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ping,
-            open::pick_and_open_document,
-            open::open_document_file,
-            save::save_document_file,
-            save::pick_and_save_document,
+            project::project_current,
+            project::project_open,
+            project::project_pick_and_open,
+            project::project_pick_and_create,
+            project::project_close,
+            project::project_pick_store_folder,
+            project::project_add_store,
+            project::project_remove_store,
+            records::records_list,
+            records::record_open,
+            records::record_create,
+            records::record_save,
+            records::record_rename,
+            records::record_archive,
             bindings::get_input_bindings,
             extensions::get_extensions_load,
             extensions::load_extensions_file,

@@ -33,11 +33,7 @@ pub fn run_extension_command(
     neighbor_path: Option<String>,
 ) -> Result<Option<bool>, String> {
     cached_runtime()
-        .run_command(
-            &id,
-            graph_json.as_deref(),
-            neighbor_path.as_deref(),
-        )
+        .run_command(&id, graph_json.as_deref(), neighbor_path.as_deref())
         .map_err(|e| e.to_string())
 }
 

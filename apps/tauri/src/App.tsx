@@ -6,6 +6,7 @@ import {
   Button,
   Checkbox,
   Group,
+  Modal,
   SegmentedControl,
   Stack,
   Tabs,
@@ -38,11 +39,14 @@ import {
 } from "./bindings";
 import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
+  CMD_DOCUMENT_DUPLICATE,
   CMD_DOCUMENT_NEW_GRAPH,
   CMD_DOCUMENT_NEW_NOTATION,
-  CMD_DOCUMENT_OPEN_FILE,
   CMD_DOCUMENT_SAVE,
-  CMD_DOCUMENT_SAVE_AS,
+  CMD_PROJECT_MANAGE_STORES,
+  CMD_PROJECT_NEW,
+  CMD_PROJECT_OPEN,
+  CMD_RECORDS_FOCUS_FILTER,
   CMD_EDIT_REDO,
   CMD_EDIT_UNDO,
   CMD_NOTATION_SNAP_TOGGLE,
@@ -68,9 +72,41 @@ import {
   documentFromDto,
   emptyImpGraph,
   newUntitledDocument,
+  type DocumentKind,
   type DocumentSummaryDto,
   type EditorDocument,
+  type RecordRef,
 } from "./documents";
+import {
+  defaultSaveStore,
+  errorMessage,
+  projectAddStore,
+  projectCurrent,
+  projectOpen,
+  projectPickAndCreate,
+  projectPickAndOpen,
+  projectPickStoreFolder,
+  projectRemoveStore,
+  RECORDS_CHANGED_EVENT,
+  recordArchive,
+  recordCreate,
+  recordOpen,
+  recordRename,
+  recordSave,
+  recordsList,
+  type ExplorerKindFilter,
+  type ProjectInfo,
+  type RecordPayload,
+  type RecordsChangedEvent,
+  type RecordSummary,
+  type SaveResult,
+} from "./records";
+import { RecordExplorer } from "./RecordExplorer";
+import {
+  ManageStoresModal,
+  SaveTargetModal,
+  type SaveTargetRequest,
+} from "./StoreDialogs";
 import { GraphErrorBoundary } from "./GraphErrorBoundary";
 import { LabGraphPanel } from "./LabGraphPanel";
 import {
@@ -96,12 +132,14 @@ import {
   collectOpenDocumentsEntry,
   ENTRY_OPEN_DOCUMENTS,
   ENTRY_PIANO_ROLL_UI,
+  ENTRY_RECORDS_UI,
   getUserStateEntry,
   pianoEntryToPrefs,
   pianoPrefsToEntry,
   setUserStateEntry,
   type OpenDocumentsEntry,
   type PianoRollUiEntry,
+  type RecordsUiEntry,
 } from "./userState";
 import classes from "./App.module.css";
 
@@ -130,10 +168,6 @@ function summarizeGraph(graph: Graph): string {
   return `Imp graph · ${nodeCount} nodes · ${edgeCount} edges`;
 }
 
-function isUntitledOrigin(origin: string): boolean {
-  return !origin || origin === "untitled" || origin.startsWith("untitled");
-}
-
 function isTextEditingTarget(el: Element | null): boolean {
   if (!el || !(el instanceof HTMLElement)) {
     return false;
@@ -145,17 +179,37 @@ function isTextEditingTarget(el: Element | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA";
 }
 
-function documentDirty(history: GraphHistory, origin: string): boolean {
-  return isDirty(history) || isUntitledOrigin(origin);
+function documentDirty(history: GraphHistory, record: RecordRef | null): boolean {
+  return isDirty(history) || record === null;
 }
 
-function notationDocDirty(history: NotationHistory, origin: string): boolean {
-  return isNotationDirty(history) || isUntitledOrigin(origin);
+function notationDocDirty(
+  history: NotationHistory,
+  record: RecordRef | null,
+): boolean {
+  return isNotationDirty(history) || record === null;
 }
 
-type SaveResult = {
-  origin: string;
-  title: string;
+const EXPLORER_KINDS: ExplorerKindFilter[] = ["lab", "imp-graph", "notation", "all"];
+
+/** Body to persist for a document. */
+function payloadFor(doc: EditorDocument): RecordPayload {
+  if (doc.kind === "notation") {
+    return { kind: "notation", notation: doc.notation ?? emptyNotation(doc.id) };
+  }
+  return { kind: "imp-graph", graph: doc.graph ?? emptyImpGraph() };
+}
+
+function emptyPayload(kind: DocumentKind): RecordPayload {
+  return kind === "notation"
+    ? { kind, notation: emptyNotation(crypto.randomUUID()) }
+    : { kind, graph: emptyImpGraph() };
+}
+
+/** Pending store picker: what is being saved, plus the dialog request. */
+type SaveTargetState = {
+  request: SaveTargetRequest;
+  payload: RecordPayload;
 };
 
 type PlaybackStatusDto = {
@@ -229,9 +283,18 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
   const titleCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [status, setStatus] = useState(
-    "Prototype · Open / Save bridged · Imp graphs + notation",
-  );
+  const [status, setStatus] = useState("Imp Lab · records in Tome data stores");
+  const [project, setProject] = useState<ProjectInfo | null>(null);
+  const projectRef = useRef(project);
+  projectRef.current = project;
+  const [records, setRecords] = useState<RecordSummary[]>([]);
+  const [kindFilter, setKindFilter] = useState<ExplorerKindFilter>("lab");
+  const [filterText, setFilterText] = useState("");
+  const filterRef = useRef<HTMLInputElement | null>(null);
+  const [lastNewRecordStore, setLastNewRecordStore] = useState<string | null>(null);
+  const [saveTarget, setSaveTarget] = useState<SaveTargetState | null>(null);
+  const [manageStoresOpen, setManageStoresOpen] = useState(false);
+  const [closePromptId, setClosePromptId] = useState<string | null>(null);
   const [registry, setRegistry] = useState<Registry>(() => getLabRegistry());
   const [extensionCommandIds, setExtensionCommandIds] = useState<Set<string>>(
     () => new Set(),
@@ -315,14 +378,39 @@ export default function App() {
           setPianoPrefs(pianoEntryToPrefs(pianoEntry, DEFAULT_PIANO_PREFS));
         }
 
+        const recordsUi = await getUserStateEntry<RecordsUiEntry>(ENTRY_RECORDS_UI);
+        if (cancelled) {
+          return;
+        }
+        if (recordsUi?.lastNewRecordStore) {
+          setLastNewRecordStore(recordsUi.lastNewRecordStore);
+        }
+        const savedKind = recordsUi?.explorerKindFilter as ExplorerKindFilter | undefined;
+        if (savedKind && EXPLORER_KINDS.includes(savedKind)) {
+          setKindFilter(savedKind);
+        }
+
         const openEntry = await getUserStateEntry<OpenDocumentsEntry>(
           ENTRY_OPEN_DOCUMENTS,
         );
         if (cancelled) {
           return;
         }
-        const paths = openEntry?.openPaths ?? [];
-        if (paths.length === 0) {
+        let opened: ProjectInfo | null = await projectCurrent().catch(() => null);
+        if (!opened && openEntry?.projectPath) {
+          try {
+            opened = await projectOpen(openEntry.projectPath);
+          } catch (err) {
+            setStatus(`Could not reopen project · ${errorMessage(err)}`);
+          }
+        }
+        if (cancelled) {
+          return;
+        }
+        setProject(opened);
+        const nodeIds = opened ? (openEntry?.openNodeIds ?? []) : [];
+        if (nodeIds.length === 0) {
+          if (opened) setStatus(`Opened project · ${opened.name}`);
           return;
         }
 
@@ -332,11 +420,9 @@ export default function App() {
         const nextPlayheads: Record<string, number> = {};
         const warnings: string[] = [];
 
-        for (const path of paths) {
+        for (const nodeId of nodeIds) {
           try {
-            const dto = await invoke<DocumentSummaryDto>("open_document_file", {
-              path,
-            });
+            const dto = await recordOpen(nodeId);
             const material = materializeOpenedDocument(dto);
             nextDocs.push(material.doc);
             if (material.graphHistory) {
@@ -349,9 +435,8 @@ export default function App() {
               nextPlayheads[material.doc.id] = material.playhead;
             }
           } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            warnings.push(`${path}: ${message}`);
-            console.warn("user-state: skip restore open", path, err);
+            warnings.push(`${nodeId}: ${errorMessage(err)}`);
+            console.warn("user-state: skip restore record", nodeId, err);
           }
         }
 
@@ -364,9 +449,9 @@ export default function App() {
         setNotationHistories(nextNotationHistories);
         setPlayheads(nextPlayheads);
 
-        const preferred = openEntry?.activePath ?? null;
+        const preferred = openEntry?.activeNodeId ?? null;
         const active =
-          (preferred && nextDocs.find((d) => d.origin === preferred)?.id) ||
+          (preferred && nextDocs.find((d) => d.id === preferred)?.id) ||
           nextDocs[0]?.id ||
           "";
         setActiveId(active);
@@ -394,14 +479,52 @@ export default function App() {
       return;
     }
     const entry = collectOpenDocumentsEntry(
+      project?.configPath ?? null,
       documents,
       activeId,
-      isUntitledOrigin,
     );
     void setUserStateEntry(ENTRY_OPEN_DOCUMENTS, entry).catch((err) => {
       console.warn("user-state: persist open-documents failed", err);
     });
-  }, [documents, activeId]);
+  }, [documents, activeId, project?.configPath]);
+
+  useEffect(() => {
+    if (!uiStateReadyRef.current) {
+      return;
+    }
+    const entry: RecordsUiEntry = {
+      lastNewRecordStore: lastNewRecordStore ?? undefined,
+      explorerKindFilter: kindFilter,
+    };
+    void setUserStateEntry(ENTRY_RECORDS_UI, entry).catch((err) => {
+      console.warn("user-state: persist records-ui failed", err);
+    });
+  }, [kindFilter, lastNewRecordStore]);
+
+  /** Re-query the explorer list (and store counts) for the open project. */
+  const refreshRecords = useCallback(async () => {
+    if (!projectRef.current) {
+      setRecords([]);
+      return;
+    }
+    try {
+      const [list, info] = await Promise.all([
+        recordsList({ kind: kindFilter, text: filterText || null }),
+        projectCurrent(),
+      ]);
+      setRecords(list);
+      if (info) setProject(info);
+    } catch (err) {
+      setStatus(`Listing records failed · ${errorMessage(err)}`);
+    }
+  }, [kindFilter, filterText]);
+  const refreshRecordsRef = useRef(refreshRecords);
+  refreshRecordsRef.current = refreshRecords;
+
+  useEffect(() => {
+    const handle = window.setTimeout(() => void refreshRecords(), 120);
+    return () => window.clearTimeout(handle);
+  }, [refreshRecords, project?.configPath]);
 
   useEffect(() => {
     if (!uiStateReadyRef.current) {
@@ -478,7 +601,7 @@ export default function App() {
             ? {
                 ...doc,
                 graph: history.present,
-                dirty: documentDirty(history, doc.origin),
+                dirty: documentDirty(history, doc.record),
                 summary: summarizeGraph(history.present),
               }
             : doc,
@@ -497,7 +620,7 @@ export default function App() {
             ? {
                 ...doc,
                 notation: history.present,
-                dirty: notationDocDirty(history, doc.origin),
+                dirty: notationDocDirty(history, doc.record),
                 summary: summarizeNotation(history.present),
                 title: history.present.title ?? doc.title,
               }
@@ -627,201 +750,403 @@ export default function App() {
     return () => clearTitleCommitTimer();
   }, [clearTitleCommitTimer]);
 
-  const openFile = useCallback(async () => {
-    try {
-      const result = await invoke<DocumentSummaryDto | null>(
-        "pick_and_open_document",
-      );
-      if (!result) {
-        setStatus("Open File… cancelled");
-        return;
-      }
-      const existing = documents.find((d) => d.origin === result.origin);
-      if (existing) {
-        // Activate in the same turn so the graph pane is not 0x0 during fitView.
-        setActiveId(existing.id);
-        setStatus(`Activated · ${existing.title}`);
-        return;
-      }
-      const material = materializeOpenedDocument(result);
-      const opened = material.doc;
-      if (material.notationHistory) {
-        setNotationHistories((prev) => ({
-          ...prev,
-          [opened.id]: material.notationHistory!,
-        }));
-        setPlayheads((prev) => ({
-          ...prev,
-          [opened.id]: material.playhead ?? 0,
-        }));
-      }
-      if (material.graphHistory) {
-        setHistories((prev) => ({
-          ...prev,
-          [opened.id]: material.graphHistory!,
-        }));
-      }
-      setDocuments((prev) => [...prev, opened]);
-      setActiveId(opened.id);
-      setStatus(`Opened · ${opened.title}`);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatus(`Open failed · ${message}`);
+  /** Add an opened record as a tab (or activate it when already open). */
+  const addOpenedDocument = useCallback((dto: DocumentSummaryDto) => {
+    const existing = documentsRef.current.find(
+      (d) => d.record?.nodeId === dto.record.nodeId,
+    );
+    if (existing) {
+      // Activate in the same turn so the graph pane is not 0x0 during fitView.
+      setActiveId(existing.id);
+      return existing;
     }
-  }, [documents]);
+    const material = materializeOpenedDocument(dto);
+    const opened = material.doc;
+    if (material.notationHistory) {
+      setNotationHistories((prev) => ({
+        ...prev,
+        [opened.id]: material.notationHistory!,
+      }));
+      setPlayheads((prev) => ({ ...prev, [opened.id]: material.playhead ?? 0 }));
+    }
+    if (material.graphHistory) {
+      setHistories((prev) => ({ ...prev, [opened.id]: material.graphHistory! }));
+    }
+    setDocuments((prev) => [...prev, opened]);
+    setActiveId(opened.id);
+    return opened;
+  }, []);
 
+  const openRecord = useCallback(
+    async (nodeId: string) => {
+      const existing = documentsRef.current.find((d) => d.record?.nodeId === nodeId);
+      if (existing) {
+        setActiveId(existing.id);
+        return;
+      }
+      try {
+        const opened = addOpenedDocument(await recordOpen(nodeId));
+        setStatus(`Opened · ${opened.title}`);
+      } catch (err) {
+        setStatus(`Open failed · ${errorMessage(err)}`);
+      }
+    },
+    [addOpenedDocument],
+  );
+
+  /** Replace a clean open tab with the record's current content (external edits). */
+  const reloadOpenRecord = useCallback(async (docId: string, nodeId: string) => {
+    try {
+      const material = materializeOpenedDocument(await recordOpen(nodeId));
+      setDocuments((prev) => prev.map((d) => (d.id === docId ? material.doc : d)));
+      if (material.graphHistory) {
+        setHistories((prev) => ({ ...prev, [docId]: material.graphHistory! }));
+      }
+      if (material.notationHistory) {
+        setNotationHistories((prev) => ({ ...prev, [docId]: material.notationHistory! }));
+      }
+    } catch (err) {
+      console.warn("reload record failed", nodeId, err);
+    }
+  }, []);
+
+  /** Re-key a tab to its record after the first save (history / playhead follow). */
   const applySaveResult = useCallback((docId: string, result: SaveResult) => {
-    setHistories((prev) => {
-      const current = prev[docId];
-      if (!current) {
-        return prev;
-      }
-      const { [docId]: _removed, ...rest } = prev;
-      return { ...rest, [result.origin]: markSaved(current) };
-    });
-    setNotationHistories((prev) => {
-      const current = prev[docId];
-      if (!current) {
-        return prev;
-      }
-      const { [docId]: _removed, ...rest } = prev;
-      return { ...rest, [result.origin]: markNotationSaved(current) };
-    });
-    setPlayheads((prev) => {
-      if (!(docId in prev)) {
-        return prev;
-      }
-      const { [docId]: parked, ...rest } = prev;
-      return { ...rest, [result.origin]: parked ?? 0 };
-    });
+    const nextId = result.record.nodeId;
+    const rekey = <T,>(prev: Record<string, T>, map: (v: T) => T) => {
+      if (!(docId in prev)) return prev;
+      const { [docId]: current, ...rest } = prev;
+      return { ...rest, [nextId]: map(current as T) };
+    };
+    setHistories((prev) => rekey(prev, markSaved));
+    setNotationHistories((prev) => rekey(prev, markNotationSaved));
+    setPlayheads((prev) => rekey(prev, (p) => p ?? 0));
+    const storeLabel =
+      projectRef.current?.stores.find((s) => s.id === result.record.corpusId)?.label ??
+      result.record.corpusId;
     setDocuments((prev) =>
       prev.map((d) =>
         d.id === docId
           ? {
               ...d,
+              id: nextId,
               dirty: false,
-              origin: result.origin,
+              record: result.record,
               title: result.title,
-              id: result.origin,
               properties: d.properties.map((row) => {
-                if (row.label === "Path") {
-                  return { ...row, value: result.origin };
-                }
-                if (row.label === "Title") {
-                  return { ...row, value: result.title };
-                }
+                if (row.label === "Store") return { ...row, value: storeLabel };
+                if (row.label === "Title") return { ...row, value: result.title };
                 return row;
               }),
             }
           : d,
       ),
     );
-    setActiveId(result.origin);
-    setStatus(`Saved · ${result.title}`);
+    setActiveId((current) => (current === docId ? nextId : current));
+    setStatus(`Saved · ${result.title} · ${storeLabel}`);
   }, []);
 
-  const savePayloadFor = (doc: EditorDocument) => {
-    if (doc.kind === "notation") {
-      return {
-        kind: "notation" as const,
-        notation: doc.notation ?? emptyNotation(doc.id),
-        path: doc.origin,
-      };
-    }
-    return {
-      kind: "imp-graph" as const,
-      graph: doc.graph ?? emptyImpGraph(),
-      path: doc.origin,
-    };
-  };
+  const activeDoc = () =>
+    documentsRef.current.find((d) => d.id === activeId) ?? documentsRef.current[0];
+
+  /** Save: overwrite the record, or ask which store a new record goes to. */
+  const saveDocument = useCallback(
+    async (doc: EditorDocument): Promise<boolean> => {
+      if (!projectRef.current) {
+        setStatus("Open or create a project to save records");
+        return false;
+      }
+      if (doc.record) {
+        try {
+          applySaveResult(doc.id, await recordSave(doc.record.nodeId, payloadFor(doc)));
+          return true;
+        } catch (err) {
+          setStatus(`Save failed · ${errorMessage(err)}`);
+          return false;
+        }
+      }
+      setSaveTarget({
+        request: {
+          mode: "save",
+          docId: doc.id,
+          title: doc.title,
+          defaultStoreId: defaultSaveStore(projectRef.current, lastNewRecordStore),
+        },
+        payload: payloadFor(doc),
+      });
+      return false;
+    },
+    [applySaveResult, lastNewRecordStore],
+  );
 
   const saveActive = useCallback(async () => {
-    const doc = documents.find((d) => d.id === activeId) ?? documents[0];
-    if (!doc || (doc.kind === "imp-graph" && !doc.graph) || (doc.kind === "notation" && !doc.notation)) {
+    const doc = activeDoc();
+    if (!doc) {
       setStatus("Nothing to save");
       return;
     }
-    try {
-      const payload = savePayloadFor(doc);
-      const needsSaveAs =
-        !doc.origin ||
-        doc.origin === "untitled" ||
-        doc.origin.startsWith("untitled");
-      const result = needsSaveAs
-        ? await invoke<SaveResult | null>("pick_and_save_document", {
-            payload,
-          })
-        : await invoke<SaveResult>("save_document_file", { payload });
-      if (!result) {
-        setStatus("Save cancelled");
-        return;
-      }
-      applySaveResult(doc.id, result);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatus(`Save failed · ${message}`);
-    }
-  }, [activeId, applySaveResult, documents]);
+    await saveDocument(doc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, saveDocument]);
 
-  const saveActiveAs = useCallback(async () => {
-    const doc = documents.find((d) => d.id === activeId) ?? documents[0];
-    if (!doc || (doc.kind === "imp-graph" && !doc.graph) || (doc.kind === "notation" && !doc.notation)) {
-      setStatus("Nothing to save");
-      return;
-    }
-    try {
-      const payload = savePayloadFor(doc);
-      const result = await invoke<SaveResult | null>("pick_and_save_document", {
-        payload,
-      });
-      if (!result) {
-        setStatus("Save cancelled");
+  const requestDuplicate = useCallback(
+    (title: string, kind: DocumentKind, payload: RecordPayload, docId: string) => {
+      if (!projectRef.current) {
+        setStatus("Open or create a project first");
         return;
       }
-      applySaveResult(doc.id, result);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setStatus(`Save failed · ${message}`);
+      setSaveTarget({
+        request: {
+          mode: "duplicate",
+          docId,
+          title: `${title} copy`,
+          defaultStoreId: defaultSaveStore(projectRef.current, lastNewRecordStore),
+        },
+        payload: { ...payload, kind },
+      });
+    },
+    [lastNewRecordStore],
+  );
+
+  const duplicateActive = useCallback(() => {
+    const doc = activeDoc();
+    if (!doc) {
+      setStatus("Nothing to duplicate");
+      return;
     }
-  }, [activeId, applySaveResult, documents]);
+    requestDuplicate(doc.title, doc.kind, payloadFor(doc), doc.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, requestDuplicate]);
+
+  const duplicateRecord = useCallback(
+    async (record: RecordSummary) => {
+      try {
+        const dto = await recordOpen(record.nodeId);
+        const payload: RecordPayload =
+          dto.kind === "notation"
+            ? { kind: "notation", notation: dto.notation }
+            : { kind: "imp-graph", graph: dto.graph };
+        requestDuplicate(dto.title, dto.kind, payload, dto.id);
+      } catch (err) {
+        setStatus(`Duplicate failed · ${errorMessage(err)}`);
+      }
+    },
+    [requestDuplicate],
+  );
+
+  const confirmSaveTarget = useCallback(
+    async (title: string, storeId: string) => {
+      const pending = saveTarget;
+      setSaveTarget(null);
+      if (!pending) return;
+      try {
+        const result = await recordCreate(title, storeId, pending.payload);
+        setLastNewRecordStore(storeId);
+        if (pending.request.mode === "save") {
+          applySaveResult(pending.request.docId, result);
+        } else {
+          await openRecord(result.record.nodeId);
+          setStatus(`Duplicated · ${result.title} · ${storeId}`);
+        }
+      } catch (err) {
+        setStatus(`Save failed · ${errorMessage(err)}`);
+      }
+    },
+    [applySaveResult, openRecord, saveTarget],
+  );
+
+  /** Explorer "+": create an empty record directly in a store and open it. */
+  const newRecordInStore = useCallback(
+    async (storeId: string, kind: DocumentKind) => {
+      const title = kind === "notation" ? "Untitled notation" : "Untitled graph";
+      try {
+        const result = await recordCreate(title, storeId, emptyPayload(kind));
+        setLastNewRecordStore(storeId);
+        await openRecord(result.record.nodeId);
+        setStatus(`New ${kind === "notation" ? "notation" : "graph"} · ${storeId}`);
+      } catch (err) {
+        setStatus(`Create failed · ${errorMessage(err)}`);
+      }
+    },
+    [openRecord],
+  );
+
+  const renameRecord = useCallback(async (nodeId: string, title: string) => {
+    try {
+      await recordRename(nodeId, title);
+      setDocuments((prev) =>
+        prev.map((d) =>
+          d.record?.nodeId === nodeId
+            ? {
+                ...d,
+                title,
+                properties: d.properties.map((row) =>
+                  row.label === "Title" ? { ...row, value: title } : row,
+                ),
+              }
+            : d,
+        ),
+      );
+      setStatus(`Renamed · ${title}`);
+    } catch (err) {
+      setStatus(`Rename failed · ${errorMessage(err)}`);
+    }
+  }, []);
+
+  /** Drop a tab and its history / playhead. */
+  const closeDocument = useCallback((docId: string) => {
+    const drop = <T,>(prev: Record<string, T>) => {
+      if (!(docId in prev)) return prev;
+      const { [docId]: _removed, ...rest } = prev;
+      return rest;
+    };
+    setHistories(drop);
+    setNotationHistories(drop);
+    setPlayheads(drop);
+    const remaining = documentsRef.current.filter((d) => d.id !== docId);
+    setDocuments(remaining);
+    setActiveId((current) => (current === docId ? (remaining[0]?.id ?? "") : current));
+    setStatus(remaining.length ? "Closed tab" : "Closed last tab");
+  }, []);
+
+  const archiveRecord = useCallback(
+    async (nodeId: string) => {
+      try {
+        await recordArchive(nodeId);
+        const open = documentsRef.current.find((d) => d.record?.nodeId === nodeId);
+        if (open && !open.dirty) {
+          closeDocument(open.id);
+        } else if (open) {
+          // Keep unsaved edits: the tab becomes a new, unsaved document.
+          setDocuments((prev) =>
+            prev.map((d) => (d.id === open.id ? { ...d, record: null, dirty: true } : d)),
+          );
+        }
+        setStatus("Archived record");
+      } catch (err) {
+        setStatus(`Archive failed · ${errorMessage(err)}`);
+      }
+    },
+    [closeDocument],
+  );
 
   const closeActive = useCallback(() => {
-    setDocuments((prev) => {
-      if (prev.length === 0) {
-        queueMicrotask(() => setStatus("No document to close"));
-        return prev;
+    const doc = activeDoc();
+    if (!doc) {
+      setStatus("No document to close");
+      return;
+    }
+    if (doc.dirty) {
+      setClosePromptId(doc.id);
+      return;
+    }
+    closeDocument(doc.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId, closeDocument]);
+
+  /** Switch projects: record tabs belong to the old session, unsaved tabs are kept. */
+  const activateProject = useCallback(
+    async (open: () => Promise<ProjectInfo | null>) => {
+      const dirtyRecords = documentsRef.current.filter((d) => d.record && d.dirty);
+      if (
+        dirtyRecords.length > 0 &&
+        !window.confirm(
+          `Discard unsaved changes in ${dirtyRecords.length} record(s) and switch project?`,
+        )
+      ) {
+        return;
       }
-      const currentId = activeId || prev[0]?.id;
-      const next = prev.filter((d) => d.id !== currentId);
-      const nextActive = next[0]?.id ?? "";
-      queueMicrotask(() => {
-        setHistories((h) => {
-          if (!currentId || !(currentId in h)) {
-            return h;
+      try {
+        const info = await open();
+        if (!info) {
+          setStatus("Cancelled");
+          return;
+        }
+        for (const doc of documentsRef.current) {
+          if (doc.record) closeDocument(doc.id);
+        }
+        setProject(info);
+        setStatus(`Opened project · ${info.name}`);
+      } catch (err) {
+        setStatus(`Project failed · ${errorMessage(err)}`);
+      }
+    },
+    [closeDocument],
+  );
+
+  const addStore = useCallback(
+    async (id: string, contentPath: string, access: "readwrite" | "readonly") => {
+      try {
+        setProject(await projectAddStore(id, contentPath, access));
+        setStatus(`Added store · ${id}`);
+        void refreshRecordsRef.current();
+        return true;
+      } catch (err) {
+        setStatus(`Add store failed · ${errorMessage(err)}`);
+        return false;
+      }
+    },
+    [],
+  );
+
+  const removeStore = useCallback(
+    async (id: string) => {
+      const affected = documentsRef.current.filter((d) => d.record?.corpusId === id);
+      if (
+        affected.some((d) => d.dirty) &&
+        !window.confirm(`Discard unsaved changes in records from "${id}"?`)
+      ) {
+        return;
+      }
+      try {
+        setProject(await projectRemoveStore(id));
+        for (const doc of affected) closeDocument(doc.id);
+        setStatus(`Removed store · ${id}`);
+        void refreshRecordsRef.current();
+      } catch (err) {
+        setStatus(`Remove store failed · ${errorMessage(err)}`);
+      }
+    },
+    [closeDocument],
+  );
+
+  // Local writes and external edits (git pull, other editors, TS Tome) refresh the explorer;
+  // clean tabs follow external edits, dirty tabs keep the user's work.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | undefined;
+    void listen<RecordsChangedEvent>(RECORDS_CHANGED_EVENT, (event) => {
+      if (cancelled) return;
+      void refreshRecordsRef.current();
+      const change = event.payload;
+      if (change.origin !== "external") return;
+      const touched = new Set(change.nodeIds);
+      const deleted = new Set(change.deletedNodeIds);
+      for (const doc of documentsRef.current) {
+        const nodeId = doc.record?.nodeId;
+        if (!nodeId) continue;
+        if (deleted.has(nodeId)) {
+          setStatus(`“${doc.title}” was removed outside Lab`);
+          setDocuments((prev) =>
+            prev.map((d) => (d.id === doc.id ? { ...d, record: null, dirty: true } : d)),
+          );
+        } else if (touched.has(nodeId) || change.modelChanged) {
+          if (doc.dirty) {
+            setStatus(`“${doc.title}” changed outside Lab · your unsaved edits are kept`);
+          } else {
+            void reloadOpenRecord(doc.id, nodeId);
           }
-          const { [currentId]: _removed, ...rest } = h;
-          return rest;
-        });
-        setNotationHistories((h) => {
-          if (!currentId || !(currentId in h)) {
-            return h;
-          }
-          const { [currentId]: _removed, ...rest } = h;
-          return rest;
-        });
-        setPlayheads((h) => {
-          if (!currentId || !(currentId in h)) {
-            return h;
-          }
-          const { [currentId]: _removed, ...rest } = h;
-          return rest;
-        });
-        setActiveId(nextActive);
-        setStatus(next.length ? "Closed tab" : "Closed last tab");
-      });
-      return next;
+        }
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
     });
-  }, [activeId]);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [reloadOpenRecord]);
 
   const undoActive = useCallback(() => {
     if (isTextEditingTarget(document.activeElement)) {
@@ -915,8 +1240,9 @@ export default function App() {
     async (id: string) => {
       const docs = documentsRef.current;
       const doc = docs.find((d) => d.id === activeId) ?? docs[0];
-      const neighborPath =
-        doc && !isUntitledOrigin(doc.origin) ? doc.origin : null;
+      // Extensions get the project config, so they can look up referenced records (a graph
+      // using a notation) across every data store of the project.
+      const neighborPath = project?.configPath ?? null;
 
       let graphJson: string | null = null;
       if (doc?.kind === "notation" && doc.notation) {
@@ -986,20 +1312,34 @@ export default function App() {
         setStatus(`Command failed · ${id}: ${message}`);
       }
     },
-    [activeId],
+    [activeId, project],
   );
 
   const dispatchCommand = useCallback(
     (id: string) => {
       switch (id) {
-        case CMD_DOCUMENT_OPEN_FILE:
-          void openFile();
+        case CMD_PROJECT_OPEN:
+          void activateProject(projectPickAndOpen);
+          break;
+        case CMD_PROJECT_NEW:
+          void activateProject(projectPickAndCreate);
+          break;
+        case CMD_PROJECT_MANAGE_STORES:
+          if (projectRef.current) {
+            setManageStoresOpen(true);
+          } else {
+            setStatus("Open or create a project first");
+          }
+          break;
+        case CMD_RECORDS_FOCUS_FILTER:
+          filterRef.current?.focus();
+          filterRef.current?.select();
           break;
         case CMD_DOCUMENT_SAVE:
           void saveActive();
           break;
-        case CMD_DOCUMENT_SAVE_AS:
-          void saveActiveAs();
+        case CMD_DOCUMENT_DUPLICATE:
+          duplicateActive();
           break;
         case CMD_DOCUMENT_NEW_GRAPH: {
           const doc = newUntitledDocument("imp-graph");
@@ -1067,12 +1407,12 @@ export default function App() {
       }
     },
     [
+      activateProject,
       closeActive,
-      openFile,
+      duplicateActive,
       redoActive,
       runExtensionCommand,
       saveActive,
-      saveActiveAs,
       toggleColorScheme,
       undoActive,
     ],
@@ -1165,6 +1505,7 @@ export default function App() {
     <AppShell
       header={{ height: 40 }}
       footer={{ height: 28 }}
+      navbar={{ width: 260, breakpoint: "sm" }}
       aside={{ width: 280, breakpoint: "sm" }}
       padding={0}
       className={classes.shell}
@@ -1175,6 +1516,11 @@ export default function App() {
             <Text size="sm" fw={600}>
               Imp Lab
             </Text>
+            {project ? (
+              <Text size="xs" c="dimmed" lineClamp={1}>
+                {project.name}
+              </Text>
+            ) : null}
           </Group>
           <Group gap={6} wrap="nowrap">
             <SegmentedControl
@@ -1190,12 +1536,7 @@ export default function App() {
             />
             <Button
               variant="default"
-              onClick={() => dispatchCommand(CMD_DOCUMENT_OPEN_FILE)}
-            >
-              Open…
-            </Button>
-            <Button
-              variant="default"
+              disabled={!active}
               onClick={() => dispatchCommand(CMD_DOCUMENT_SAVE)}
             >
               Save
@@ -1203,6 +1544,30 @@ export default function App() {
           </Group>
         </Group>
       </AppShell.Header>
+
+      <AppShell.Navbar className={classes.navbar}>
+        <RecordExplorer
+          project={project}
+          records={records}
+          kindFilter={kindFilter}
+          onKindFilterChange={setKindFilter}
+          text={filterText}
+          onTextChange={setFilterText}
+          filterRef={filterRef}
+          openNodeIds={
+            new Set(documents.flatMap((d) => (d.record ? [d.record.nodeId] : [])))
+          }
+          activeNodeId={active?.record?.nodeId ?? null}
+          onOpen={(record) => void openRecord(record.nodeId)}
+          onNewInStore={(storeId, kind) => void newRecordInStore(storeId, kind)}
+          onRename={(nodeId, title) => void renameRecord(nodeId, title)}
+          onArchive={(nodeId) => void archiveRecord(nodeId)}
+          onDuplicate={(record) => void duplicateRecord(record)}
+          onOpenProject={() => dispatchCommand(CMD_PROJECT_OPEN)}
+          onNewProject={() => dispatchCommand(CMD_PROJECT_NEW)}
+          onManageStores={() => dispatchCommand(CMD_PROJECT_MANAGE_STORES)}
+        />
+      </AppShell.Navbar>
 
       <AppShell.Aside className={classes.aside} p="sm">
         <Stack gap="xs">
@@ -1398,7 +1763,9 @@ export default function App() {
                 No documents open
               </Text>
               <Text size="xs" c="dimmed" ta="center">
-                File → Open File…, New graph, or New notation
+                {project
+                  ? "Open a record from the explorer, or File → New graph / New notation"
+                  : "File → New Project… or Open Project… to work with data stores"}
               </Text>
             </Stack>
           </Box>
@@ -1424,7 +1791,10 @@ export default function App() {
                       {doc.kind}
                     </Badge>
                     <Text size="xs" c="dimmed" lineClamp={1}>
-                      {doc.origin}
+                      {doc.record
+                        ? (project?.stores.find((s) => s.id === doc.record?.corpusId)
+                            ?.label ?? doc.record.corpusId)
+                        : "Not saved yet"}
                     </Text>
                   </Group>
                   <Title order={4} mb="xs">
@@ -1488,6 +1858,66 @@ export default function App() {
           </Text>
         </Group>
       </AppShell.Footer>
+
+      <SaveTargetModal
+        request={saveTarget?.request ?? null}
+        project={project}
+        onCancel={() => {
+          setSaveTarget(null);
+          setStatus("Save cancelled");
+        }}
+        onConfirm={(title, storeId) => void confirmSaveTarget(title, storeId)}
+      />
+
+      <ManageStoresModal
+        opened={manageStoresOpen}
+        project={project}
+        onClose={() => setManageStoresOpen(false)}
+        onPickFolder={() => projectPickStoreFolder().catch(() => null)}
+        onAdd={addStore}
+        onRemove={(id) => void removeStore(id)}
+      />
+
+      <Modal
+        opened={closePromptId !== null}
+        onClose={() => setClosePromptId(null)}
+        title="Unsaved changes"
+        size="sm"
+      >
+        <Stack gap="sm">
+          <Text size="sm">
+            Save changes to “
+            {documents.find((d) => d.id === closePromptId)?.title ?? "document"}” before
+            closing?
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setClosePromptId(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              color="red"
+              onClick={() => {
+                if (closePromptId) closeDocument(closePromptId);
+                setClosePromptId(null);
+              }}
+            >
+              Discard
+            </Button>
+            <Button
+              onClick={async () => {
+                const doc = documents.find((d) => d.id === closePromptId);
+                setClosePromptId(null);
+                if (doc && (await saveDocument(doc))) {
+                  closeDocument(doc.record?.nodeId ?? doc.id);
+                }
+              }}
+            >
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </AppShell>
   );
 }

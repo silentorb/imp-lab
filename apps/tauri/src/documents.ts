@@ -1,4 +1,4 @@
-/** Document tab state for Imp Lab (Imp graphs + Aura notation). */
+/** Document tab state for Imp Lab (Imp graphs + Aura notation stored as Tome records). */
 
 import type { Graph } from "imp-core-types";
 import {
@@ -11,12 +11,21 @@ export type DocumentKind = "imp-graph" | "notation";
 
 export type DocumentProperty = { label: string; value: string };
 
+/** Where a saved document lives: a Tome node in one of the project's data stores. */
+export type RecordRef = {
+  nodeId: string;
+  corpusId: string;
+  /** Content root of the owning store. */
+  contentDir: string;
+};
+
 export type EditorDocument = {
+  /** Node id once saved; a session-local UUID before the first save. */
   id: string;
   title: string;
   kind: DocumentKind;
-  /** Filesystem path or untitled label */
-  origin: string;
+  /** `null` until the document is first saved to a store. */
+  record: RecordRef | null;
   dirty: boolean;
   summary: string;
   properties: DocumentProperty[];
@@ -26,13 +35,12 @@ export type EditorDocument = {
   notation?: Notation;
 };
 
-/** Host DTO from `pick_and_open_document` / `open_document_file`. */
+/** Host DTO from `record_open`. */
 export type DocumentSummaryDto = {
   id: string;
   title: string;
   kind: DocumentKind;
-  origin: string;
-  dirty: boolean;
+  record: RecordRef;
   summary: string;
   properties: DocumentProperty[];
   graph?: Graph;
@@ -40,7 +48,11 @@ export type DocumentSummaryDto = {
 };
 
 export function documentFromDto(dto: DocumentSummaryDto): EditorDocument {
-  return { ...dto };
+  return { ...dto, dirty: false };
+}
+
+export function isUnsaved(doc: Pick<EditorDocument, "record">): boolean {
+  return doc.record === null;
 }
 
 export function emptyImpGraph(): Graph {
@@ -58,13 +70,13 @@ export function newUntitledDocument(
       id,
       title,
       kind,
-      origin: "untitled",
+      record: null,
       dirty: true,
       summary: summarizeNotation(notation),
       properties: [
-        { label: "Id", value: id },
         { label: "Type", value: kind },
         { label: "Title", value: title },
+        { label: "Store", value: "Not saved yet" },
       ],
       notation,
     };
@@ -75,13 +87,13 @@ export function newUntitledDocument(
     id,
     title,
     kind,
-    origin: "untitled",
+    record: null,
     dirty: true,
     summary: "Untitled Imp graph · empty",
     properties: [
-      { label: "Id", value: id },
       { label: "Type", value: kind },
       { label: "Title", value: title },
+      { label: "Store", value: "Not saved yet" },
     ],
     graph: emptyImpGraph(),
   };

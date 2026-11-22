@@ -7,8 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Bundled default bindings JSON.
-pub const DEFAULT_BINDINGS_JSON: &str =
-    include_str!("../assets/default-bindings.json");
+pub const DEFAULT_BINDINGS_JSON: &str = include_str!("../assets/default-bindings.json");
 
 const SUPPORTED_VERSION: u32 = 1;
 
@@ -19,11 +18,14 @@ const MOD_LOGO: u8 = 8;
 
 /// Builtin host command ids (aligned with React `commands.ts` / menu).
 pub const BUILTIN_COMMAND_IDS: &[&str] = &[
-    "document.open-file",
+    "project.open",
     "document.new.graph",
     "document.new.notation",
     "document.save",
-    "document.save-as",
+    "document.duplicate-to-store",
+    "project.new",
+    "project.manage-stores",
+    "records.focus-filter",
     "document.close_active",
     "edit.undo",
     "edit.redo",
@@ -191,12 +193,8 @@ impl Bindings {
     }
 
     /// Parse bindings from a JSON string, skipping ids not in `known_commands`.
-    pub fn from_json_str(
-        json: &str,
-        known_commands: &HashSet<String>,
-    ) -> Result<Self, String> {
-        let file: BindingsFile =
-            serde_json::from_str(json).map_err(|e| e.to_string())?;
+    pub fn from_json_str(json: &str, known_commands: &HashSet<String>) -> Result<Self, String> {
+        let file: BindingsFile = serde_json::from_str(json).map_err(|e| e.to_string())?;
         if file.version != SUPPORTED_VERSION {
             return Err(format!(
                 "unsupported bindings version {} (expected {SUPPORTED_VERSION})",
@@ -230,15 +228,9 @@ impl Bindings {
                     let dto = BindingDto {
                         command: entry.command.clone(),
                         key: key.trim().to_ascii_lowercase(),
-                        modifiers: modifiers
-                            .iter()
-                            .map(|m| m.to_ascii_lowercase())
-                            .collect(),
+                        modifiers: modifiers.iter().map(|m| m.to_ascii_lowercase()).collect(),
                     };
-                    if key_map
-                        .insert(binding, entry.command.clone())
-                        .is_some()
-                    {
+                    if key_map.insert(binding, entry.command.clone()).is_some() {
                         eprintln!(
                             "imp-lab bindings: duplicate trigger for `{}`; last wins",
                             entry.command
@@ -329,9 +321,7 @@ fn parse_modifiers(names: &[String]) -> Result<u8, String> {
             "ctrl" | "control" => modifiers |= MOD_CTRL,
             "alt" => modifiers |= MOD_ALT,
             "shift" => modifiers |= MOD_SHIFT,
-            "logo" | "super" | "meta" | "cmd" | "command" => {
-                modifiers |= MOD_LOGO
-            }
+            "logo" | "super" | "meta" | "cmd" | "command" => modifiers |= MOD_LOGO,
             other => {
                 return Err(format!("unknown modifier `{other}`"));
             }
@@ -474,7 +464,7 @@ mod tests {
 
     fn known() -> HashSet<String> {
         HashSet::from([
-            "document.open-file".to_string(),
+            "project.open".to_string(),
             "document.close_active".to_string(),
             "edit.undo".to_string(),
             "edit.redo".to_string(),
@@ -484,12 +474,11 @@ mod tests {
 
     #[test]
     fn parses_default_bindings() {
-        let bindings =
-            Bindings::from_json_str(DEFAULT_BINDINGS_JSON, &known()).unwrap();
+        let bindings = Bindings::from_json_str(DEFAULT_BINDINGS_JSON, &known()).unwrap();
         // Defaults include more commands than `known()`; only known kept.
         assert_eq!(bindings.len(), 5);
         assert_eq!(
-            bindings.accelerator_for_command("document.open-file").as_deref(),
+            bindings.accelerator_for_command("project.open").as_deref(),
             Some("CmdOrCtrl+O")
         );
         assert_eq!(
@@ -508,11 +497,8 @@ mod tests {
 
     #[test]
     fn rejects_unsupported_version() {
-        let err = Bindings::from_json_str(
-            r#"{"version": 99, "bindings": []}"#,
-            &known(),
-        )
-        .unwrap_err();
+        let err =
+            Bindings::from_json_str(r#"{"version": 99, "bindings": []}"#, &known()).unwrap_err();
         assert!(err.contains("unsupported bindings version"));
     }
 
@@ -527,7 +513,7 @@ mod tests {
                   "when": { "type": "key", "key": "x", "modifiers": [] }
                 },
                 {
-                  "command": "document.open-file",
+                  "command": "project.open",
                   "when": { "type": "key", "key": "o", "modifiers": ["ctrl"] }
                 }
               ]
@@ -537,17 +523,15 @@ mod tests {
         .unwrap();
         assert_eq!(bindings.len(), 1);
         assert_eq!(
-            bindings.accelerator_for_command("document.open-file").as_deref(),
+            bindings.accelerator_for_command("project.open").as_deref(),
             Some("CmdOrCtrl+O")
         );
     }
 
     #[test]
     fn load_chain_prefers_user_file() {
-        let dir = std::env::temp_dir().join(format!(
-            "imp-lab-bindings-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("imp-lab-bindings-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let user = dir.join("bindings.json");
@@ -565,8 +549,7 @@ mod tests {
         )
         .unwrap();
 
-        let bindings =
-            Bindings::load_chain(Some(&user), DEFAULT_BINDINGS_JSON, &known());
+        let bindings = Bindings::load_chain(Some(&user), DEFAULT_BINDINGS_JSON, &known());
         assert_eq!(bindings.len(), 1);
         assert_eq!(
             bindings
@@ -574,19 +557,15 @@ mod tests {
                 .as_deref(),
             Some("CmdOrCtrl+Q")
         );
-        assert!(bindings
-            .accelerator_for_command("document.open-file")
-            .is_none());
+        assert!(bindings.accelerator_for_command("project.open").is_none());
 
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn load_chain_falls_back_to_default_when_user_missing() {
-        let missing =
-            PathBuf::from("/tmp/imp-lab-bindings-does-not-exist.json");
-        let bindings =
-            Bindings::load_chain(Some(&missing), DEFAULT_BINDINGS_JSON, &known());
+        let missing = PathBuf::from("/tmp/imp-lab-bindings-does-not-exist.json");
+        let bindings = Bindings::load_chain(Some(&missing), DEFAULT_BINDINGS_JSON, &known());
         assert_eq!(bindings.len(), 5);
     }
 
@@ -603,7 +582,7 @@ mod tests {
               "version": 1,
               "bindings": [
                 {
-                  "command": "document.open-file",
+                  "command": "project.open",
                   "when": { "type": "key", "key": "escape", "modifiers": [] }
                 }
               ]
@@ -612,7 +591,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            bindings.accelerator_for_command("document.open-file").as_deref(),
+            bindings.accelerator_for_command("project.open").as_deref(),
             Some("Escape")
         );
     }

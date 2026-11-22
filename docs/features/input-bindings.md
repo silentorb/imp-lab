@@ -48,7 +48,8 @@ Same shape as the Iced Aura Editor design:
 
 | Trigger | Command |
 | --- | --- |
-| Ctrl/Cmd+O | `document.open-file` |
+| Ctrl/Cmd+O | `project.open` |
+| Ctrl/Cmd+P | `records.focus-filter` (Record Explorer filter) |
 | Ctrl/Cmd+W | `document.close_active` |
 | Ctrl/Cmd+N | `document.new.notation` |
 | Ctrl/Cmd+S | `document.save` |

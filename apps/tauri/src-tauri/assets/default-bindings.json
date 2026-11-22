@@ -2,8 +2,12 @@
   "version": 1,
   "bindings": [
     {
-      "command": "document.open-file",
+      "command": "project.open",
       "when": { "type": "key", "key": "o", "modifiers": ["ctrl"] }
+    },
+    {
+      "command": "records.focus-filter",
+      "when": { "type": "key", "key": "p", "modifiers": ["ctrl"] }
     },
     {
       "command": "document.close_active",

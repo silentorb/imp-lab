@@ -15,10 +15,9 @@ This repo must not depend on Aura (`aura_*`) crates. Product hosts compose lab c
 
 | Path | Layer | Role |
 | --- | --- | --- |
-| `crates/imp_documents/` | Backend | Multi-document session store with host-defined payloads |
 | `crates/imp_graph_editor/` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, layout, edit helpers, chrome widgets) |
 | `crates/imp_lab_extensions/` | Backend | Tome-shaped optional `extensions.json` parse + dynamically linked extension loading (`imp-catalog`, `command`, `menu-item`, `service`) |
-| `apps/tauri/` | Desktop app | Imp Lab; Open/Save bridged; editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports, Add palette, selected-node Title + input literals in Properties, on-node literal fields); Aura JSON `notation` documents with piano-roll editor (tools/snap/playhead); Edit Undo/Redo for Imp + notation history; host ELK layered LR layout; configurable input bindings (JSON → commands; menus derive native accelerators); persisted UI chrome (open tabs, piano prefs, window geometry) under the OS app config dir; optional Aura catalogs + playback (Play menu / Space toggle; graphs and notation tips) via Lab pack / `extensions.json` (no Aura crate dep); Simple mode deferred |
+| `apps/tauri/` | Desktop app | Imp Lab; projects of Tome data stores via [tome-rust-server](https://github.com/silentorb/tome-rust-server) `tome_db` (sibling checkout `../tome-rust-server`), Record Explorer, records saved to a chosen store, no filesystem open/save ([`docs/features/projects-and-records.md`](docs/features/projects-and-records.md)); editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView` (Precise ports, Add palette, selected-node Title + input literals in Properties, on-node literal fields); Aura JSON `notation` documents with piano-roll editor (tools/snap/playhead); Edit Undo/Redo for Imp + notation history; host ELK layered LR layout; configurable input bindings (JSON → commands; menus derive native accelerators); persisted UI chrome (open tabs, piano prefs, window geometry) under the OS app config dir; optional Aura catalogs + playback (Play menu / Space toggle; graphs and notation tips) via Lab pack / `extensions.json` (no Aura crate dep); Simple mode deferred |
 
 ### Input bindings
 

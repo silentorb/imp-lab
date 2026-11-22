@@ -131,7 +131,7 @@ Declares a host command id (Aura Iced-style, e.g. `play.start`). Params:
 | `serviceId` | Id of the enabled `service` component that handles the command |
 | `action` | Service action: `start`, `stop`, `toggle`, or `is_playing` |
 
-The Tauri shell keeps built-in File/Edit/View commands local; extension command ids are forwarded via `run_extension_command` with the active graph JSON and optional document path.
+The Tauri shell keeps built-in File/Edit/View commands local; extension command ids are forwarded via `run_extension_command` with the active graph JSON and an optional neighbor path. Documents are Tome records (see [projects and records](projects-and-records.md)), so the neighbor path is the open project's config file (`imp-project.json`). An extension that follows references between records (a graph using a notation by node id) reads them from the project's data stores. With no project open it is null. The ABI is unchanged.
 
 ### `menu-item`
 

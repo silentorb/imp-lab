@@ -17,7 +17,6 @@ GUI and non-GUI concerns live in the same repository for now (separate crates / 
 
 | Path | Layer | Role |
 | --- | --- | --- |
-| `imp_documents` | Backend | Multi-document session store (tabs, paths, dirty/lifecycle) with host-defined payloads |
 | `imp_lab_extensions` | Backend | Optional Tome-shaped `extensions.json` + dynamic library loading (`imp-catalog`) |
 | `imp_graph_editor` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, edit helpers, chrome widgets) |
 | `apps/tauri` | Desktop app | Imp Lab (`imp_lab` / `imp-lab`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView`; Edit Undo/Redo; configurable input bindings (menus derive accelerators); host ELK LR layout; optional catalogs via Lab pack; Simple mode deferred |

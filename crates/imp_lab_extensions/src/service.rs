@@ -13,7 +13,9 @@ use thiserror::Error;
 pub struct ImpLabServiceV0 {
     /// Opaque service context.
     pub ctx: *mut c_void,
-    /// Start playback / primary action with graph JSON + optional neighbor path.
+    /// Start playback / primary action with graph JSON + optional neighbor path. The neighbor
+    /// path is the open project's config file (`imp-project.json`, null with no project);
+    /// referenced records are read from the data stores it configures.
     pub start: Option<
         unsafe extern "C" fn(
             ctx: *mut c_void,

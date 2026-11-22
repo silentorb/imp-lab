@@ -5,10 +5,19 @@ import type { PianoRollUiPrefs } from "./piano-roll";
 
 export const ENTRY_OPEN_DOCUMENTS = "open-documents";
 export const ENTRY_PIANO_ROLL_UI = "piano-roll-ui";
+export const ENTRY_RECORDS_UI = "records-ui";
 
+/** Open project and record tabs (pre-project `openPaths` entries are ignored). */
 export type OpenDocumentsEntry = {
-  openPaths: string[];
-  activePath?: string | null;
+  projectPath?: string | null;
+  openNodeIds?: string[];
+  activeNodeId?: string | null;
+};
+
+/** Record explorer prefs. */
+export type RecordsUiEntry = {
+  lastNewRecordStore?: string | null;
+  explorerKindFilter?: string | null;
 };
 
 export type PianoRollUiEntry = {
@@ -66,18 +75,15 @@ export function pianoEntryToPrefs(
 }
 
 export function collectOpenDocumentsEntry(
-  documents: Array<{ id: string; origin: string }>,
+  projectPath: string | null,
+  documents: Array<{ id: string; record: { nodeId: string } | null }>,
   activeId: string,
-  isUntitled: (origin: string) => boolean,
 ): OpenDocumentsEntry {
-  const openPaths = documents
-    .map((d) => d.origin)
-    .filter((origin) => !isUntitled(origin));
+  const openNodeIds = documents.flatMap((d) => (d.record ? [d.record.nodeId] : []));
   const activeDoc = documents.find((d) => d.id === activeId) ?? documents[0];
-  const activePath =
-    activeDoc && !isUntitled(activeDoc.origin) ? activeDoc.origin : null;
   return {
-    openPaths,
-    activePath: activePath ?? undefined,
+    projectPath: projectPath ?? undefined,
+    openNodeIds,
+    activeNodeId: activeDoc?.record?.nodeId ?? undefined,
   };
 }

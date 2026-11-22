@@ -27,6 +27,7 @@ pub const DEBOUNCE: Duration = Duration::from_millis(500);
 /// Entry id → bucket file stem.
 pub const ENTRY_OPEN_DOCUMENTS: &str = "open-documents";
 pub const ENTRY_PIANO_ROLL_UI: &str = "piano-roll-ui";
+pub const ENTRY_RECORDS_UI: &str = "records-ui";
 pub const ENTRY_WINDOW: &str = "window";
 
 pub const BUCKET_DOCUMENTS: &str = "documents";
@@ -79,10 +80,9 @@ impl UserDir {
                 return Some(Self { path });
             }
         }
-        directories::ProjectDirs::from("com", "Silent Orb", "imp-lab")
-            .map(|dirs| Self {
-                path: dirs.config_dir().to_path_buf(),
-            })
+        directories::ProjectDirs::from("com", "Silent Orb", "imp-lab").map(|dirs| Self {
+            path: dirs.config_dir().to_path_buf(),
+        })
     }
 
     /// Explicit directory (tests and tooling).
@@ -208,7 +208,7 @@ impl UserStateStore {
     pub fn bucket_for_entry(entry_id: &str) -> Option<&'static str> {
         match entry_id {
             ENTRY_OPEN_DOCUMENTS => Some(BUCKET_DOCUMENTS),
-            ENTRY_PIANO_ROLL_UI => Some(BUCKET_UI),
+            ENTRY_PIANO_ROLL_UI | ENTRY_RECORDS_UI => Some(BUCKET_UI),
             ENTRY_WINDOW => Some(BUCKET_WINDOW),
             _ => None,
         }
@@ -300,17 +300,36 @@ impl UserStateStore {
     }
 }
 
-/// Open-document tab snapshot (`documents` bucket / `open-documents` entry).
+/// Open project + record tab snapshot (`documents` bucket / `open-documents` entry).
+///
+/// Entries written before projects existed (`openPaths` / `activePath`) load as empty: the
+/// old file paths are discarded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(not(test), allow(dead_code))]
 pub struct OpenDocumentsEntry {
-    /// Open filesystem paths in tab order (untitled omitted).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub open_paths: Vec<String>,
-    /// Active filesystem path when one is selected.
+    /// Project config reopened at startup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_path: Option<String>,
+    pub project_path: Option<String>,
+    /// Open record node ids in tab order (unsaved documents omitted).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub open_node_ids: Vec<String>,
+    /// Active record when one is selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_node_id: Option<String>,
+}
+
+/// Record explorer prefs (`ui` bucket / `records-ui` entry).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(not(test), allow(dead_code))]
+pub struct RecordsUiEntry {
+    /// Store chosen last time a new record was saved (default save target).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_new_record_store: Option<String>,
+    /// Explorer kind filter: `lab` | `imp-graph` | `notation` | `all`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explorer_kind_filter: Option<String>,
 }
 
 /// Piano-roll tool / snap prefs (`ui` bucket / `piano-roll-ui` entry).
@@ -600,8 +619,9 @@ mod tests {
         let dir = temp_user_dir("flush");
         let mut store = UserStateStore::open(dir.clone());
         let entry = OpenDocumentsEntry {
-            open_paths: vec!["/tmp/a.json".into()],
-            active_path: Some("/tmp/a.json".into()),
+            project_path: Some("/tmp/lab/imp-project.json".into()),
+            open_node_ids: vec!["01M80M9AAAAA00000000000001".into()],
+            active_node_id: Some("01M80M9AAAAA00000000000001".into()),
         };
         let gen = store
             .set_entry(BUCKET_DOCUMENTS, ENTRY_OPEN_DOCUMENTS, &entry)
@@ -629,8 +649,8 @@ mod tests {
                 BUCKET_DOCUMENTS,
                 ENTRY_OPEN_DOCUMENTS,
                 &OpenDocumentsEntry {
-                    open_paths: vec!["/a".into()],
-                    active_path: None,
+                    open_node_ids: vec!["/a".into()],
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -639,8 +659,8 @@ mod tests {
                 BUCKET_DOCUMENTS,
                 ENTRY_OPEN_DOCUMENTS,
                 &OpenDocumentsEntry {
-                    open_paths: vec!["/b".into()],
-                    active_path: None,
+                    open_node_ids: vec!["/b".into()],
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -653,6 +673,33 @@ mod tests {
         assert!(text.contains("/b"));
         assert!(!text.contains("\"/a\""));
         let _ = fs::remove_dir_all(dir.path());
+    }
+
+    #[test]
+    fn records_ui_entry_lives_in_ui_bucket() {
+        assert_eq!(
+            UserStateStore::bucket_for_entry(ENTRY_RECORDS_UI),
+            Some(BUCKET_UI)
+        );
+        let mut store = UserStateStore::in_memory();
+        let entry = RecordsUiEntry {
+            last_new_record_store: Some("main".into()),
+            explorer_kind_filter: Some("lab".into()),
+        };
+        store
+            .set_entry(BUCKET_UI, ENTRY_RECORDS_UI, &entry)
+            .unwrap();
+        let loaded: RecordsUiEntry = store.get_entry(BUCKET_UI, ENTRY_RECORDS_UI).unwrap();
+        assert_eq!(loaded, entry);
+    }
+
+    #[test]
+    fn pre_project_open_paths_entry_loads_empty() {
+        let legacy: OpenDocumentsEntry = serde_json::from_value(serde_json::json!({
+            "openPaths": ["/tmp/a.json"], "activePath": "/tmp/a.json"
+        }))
+        .unwrap();
+        assert_eq!(legacy, OpenDocumentsEntry::default());
     }
 
     #[test]
@@ -694,9 +741,8 @@ mod tests {
 
         let mut reloaded = UserStateStore::open(dir.clone());
         reloaded.load_known();
-        let loaded_piano: PianoRollUiEntry = reloaded
-            .get_entry(BUCKET_UI, ENTRY_PIANO_ROLL_UI)
-            .unwrap();
+        let loaded_piano: PianoRollUiEntry =
+            reloaded.get_entry(BUCKET_UI, ENTRY_PIANO_ROLL_UI).unwrap();
         let loaded_window: WindowEntry = reloaded.get_entry(BUCKET_WINDOW, ENTRY_WINDOW).unwrap();
         assert_eq!(loaded_piano, piano);
         assert_eq!(loaded_window, window);

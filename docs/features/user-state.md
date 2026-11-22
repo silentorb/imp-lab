@@ -26,18 +26,25 @@ Each bucket is `{config_dir}/{bucket}.json` with envelope:
 
 | Entry id | Bucket file | Shape |
 | --- | --- | --- |
-| `open-documents` | `documents.json` | `openPaths` (string[]), optional `activePath` |
+| `open-documents` | `documents.json` | optional `projectPath`, `openNodeIds` (string[]), optional `activeNodeId` |
 | `piano-roll-ui` | `ui.json` | `activeTool`, `snapEnabled`, `snapResolution` |
+| `records-ui` | `ui.json` | optional `lastNewRecordStore`, optional `explorerKindFilter` (`lab` \| `imp-graph` \| `notation` \| `all`) |
 | `window` | `window.json` | `width`, `height`, optional `x`/`y`, `maximized` |
 
 Missing file, missing entry, unsupported `version`, or invalid JSON → defaults for that bucket/entry; the app still starts (with logging).
 
 ### Open documents
 
-- Only filesystem paths; untitled tabs are omitted
-- Collect after open / activate / close / save-as path change
-- Apply once at startup: reopen each path via `open_document_file`, then select `activePath` when still open
-- Paths that fail to open are skipped with a warning
+- The open project's config path plus the node ids of open record tabs; unsaved tabs are omitted (see [projects and records](projects-and-records.md))
+- Collect after open / activate / close / first save / project switch
+- Apply once at startup: reopen `projectPath` via `project_open`, reopen each node id via `record_open`, then select `activeNodeId` when still open
+- Records that fail to open are skipped with a warning
+- Entries from before projects (`openPaths` / `activePath`) are ignored; old file paths are not reopened
+
+### Records UI
+
+- `lastNewRecordStore`: default store in the "Save new record" dialog (falls back to the primary store when it is gone or read-only)
+- `explorerKindFilter`: the Record Explorer's kind filter
 
 ### Piano roll UI
 
