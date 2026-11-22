@@ -1,8 +1,8 @@
-# UI state persistence (Tauri)
+# UI state persistence
 
 ## Summary
 
-Lab Tauri persists **editor UI chrome** across launches: open saved tabs, piano-roll tool/snap prefs, and main-window geometry. This is ordinary durable local UI state — not document content, not a general settings/config framework, and not a start/finish “session.”
+Imp Lab persists **editor UI chrome** across launches: open saved tabs, piano-roll tool/snap prefs, and main-window geometry. This is ordinary durable local UI state — not document content, not a general settings/config framework, and not a start/finish “session.”
 
 ## Location
 
@@ -77,7 +77,7 @@ Mantine color scheme stays on webview `localStorage` (`imp-lab-color-scheme`) fo
 
 - General app/settings configuration or layered install/project/user config
 - Shell pane trees, pan/zoom camera, selection, recent-files list
-- Graph connection-mode / add-node-type prefs (no Tauri UI yet)
+- Graph connection-mode / add-node-type prefs (not in the desktop UI yet)
 - Extension `user-state` registration
 - In-app settings UI for these entries
 - Persisting untitled dirty buffers

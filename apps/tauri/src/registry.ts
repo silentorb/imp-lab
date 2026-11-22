@@ -13,7 +13,7 @@ export type ExtensionCatalogs = {
   graphLibraries?: unknown[];
 };
 
-/** Lab Tauri host registry — Imp core, plus catalogs from optional extensions. */
+/** Imp Lab host registry — Imp core, plus catalogs from optional extensions. */
 export function getLabRegistry(catalogs?: ExtensionCatalogs | null): Registry {
   let registry = loadNodeLibrary(createRegistry(), coreNodeLibrary);
   if (!catalogs) {

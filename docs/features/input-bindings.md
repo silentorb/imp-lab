@@ -2,7 +2,7 @@
 
 ## Summary
 
-Lab Tauri maps user keyboard input to **commands** through a configurable bindings layer (ported from the deprecated Iced Aura Editor schema). Native menus **derive accelerators** from the same table so the OS can show the right-aligned shortcut column (VS Code–style menubar + keybinding ownership).
+Imp Lab maps user keyboard input to **commands** through a configurable bindings layer (ported from the deprecated Iced Aura Editor schema). Native menus **derive accelerators** from the same table so the OS can show the right-aligned shortcut column (VS Code–style menubar + keybinding ownership).
 
 ## Ownership (VS Code–aligned)
 

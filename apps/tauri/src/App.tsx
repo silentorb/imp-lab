@@ -1175,9 +1175,6 @@ export default function App() {
             <Text size="sm" fw={600}>
               Imp Lab
             </Text>
-            <Badge size="xs" variant="light" color="gray">
-              Tauri experiment
-            </Badge>
           </Group>
           <Group gap={6} wrap="nowrap">
             <SegmentedControl

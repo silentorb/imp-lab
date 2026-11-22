@@ -1,4 +1,4 @@
-//! Thin filesystem open for the experimental Imp Lab Tauri host.
+//! Thin filesystem open for the Imp Lab desktop app.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -234,7 +234,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let path = std::env::temp_dir().join(format!("imp-lab-tauri-open-{name}-{nanos}.json"));
+        let path = std::env::temp_dir().join(format!("imp-lab-open-{name}-{nanos}.json"));
         fs::write(&path, body).unwrap();
         path
     }

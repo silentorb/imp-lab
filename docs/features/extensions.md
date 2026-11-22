@@ -8,7 +8,7 @@ Modeled after [Tome’s extension system](https://github.com/silentorb/tome/blob
 
 ## Dual-stack modules
 
-Lab Tauri is Rust host + React/TypeScript client. Each extension row may declare:
+Imp Lab is a Rust host + React/TypeScript client. Each extension row may declare:
 
 | Field | Role |
 | --- | --- |
@@ -154,18 +154,18 @@ Long-lived host backend. The extension cdylib registers an `ImpLabServiceV0` vta
 2. For each enabled extension with `libraryPath`, load the cdylib and call `imp_lab_extension_register`.
 3. Enable components whose `extensionId` is enabled; for `imp-catalog`, apply registered catalogs; collect registered services; build menus from `menu-item` rows.
 
-Extensions **must not** depend on the Tauri app crate (`imp_lab_tauri`). They depend on `imp_lab_extensions` (register contract) and domain crates as needed.
+Extensions **must not** depend on the Imp Lab app crate (`imp_lab`). They depend on `imp_lab_extensions` (register contract) and domain crates as needed.
 
 ## Product packs
 
-Aura ships an audio Lab pack (`extensions.json` + catalog/playback cdylibs + data) beside `imp-lab-tauri` on Windows export. Lab itself never depends on Aura crates or packages.
+Aura ships an audio Lab pack (`extensions.json` + catalog/playback cdylibs + data) beside `imp-lab` on Windows export. Lab itself never depends on Aura crates or packages.
 
 ## Non-goals (for now)
 
 - Full client-side TS extension runtime / dynamic UI registration
 - Marketplace / config UI
 - Dynamic unsigned remote plugins
-- Iced Aura Editor extension runtime (deprecated; Tauri Lab + packs are the editor path)
+- Iced Aura Editor extension runtime (deprecated; Imp Lab + packs are the editor path)
 
 ## See also
 

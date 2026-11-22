@@ -1,4 +1,4 @@
-/** Document tab state for the Tauri shell (Imp graphs + Aura notation). */
+/** Document tab state for Imp Lab (Imp graphs + Aura notation). */
 
 import type { Graph } from "imp-core-types";
 import {

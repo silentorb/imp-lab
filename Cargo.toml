@@ -6,7 +6,7 @@ members = [
     "crates/imp_lab_extensions",
     "apps/tauri/src-tauri",
 ]
-# Iced crates (default) must not require WebKit/GTK from the Tauri host.
+# Library crates (default) must not require WebKit/GTK from the desktop app.
 default-members = [
     "crates/imp_documents",
     "crates/imp_graph_editor",

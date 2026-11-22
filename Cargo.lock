@@ -2642,18 +2642,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "imp_lab_extensions"
-version = "0.1.0"
-dependencies = [
- "libloading 0.8.9",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "imp_lab_tauri"
+name = "imp_lab"
 version = "0.1.0"
 dependencies = [
  "directories",
@@ -2663,6 +2652,17 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "imp_lab_extensions"
+version = "0.1.0"
+dependencies = [
+ "libloading 0.8.9",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

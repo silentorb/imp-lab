@@ -1,4 +1,4 @@
-//! Thin filesystem save for the experimental Imp Lab Tauri host.
+//! Thin filesystem save for the Imp Lab desktop app.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -168,7 +168,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!("imp-lab-tauri-save-{name}-{nanos}.json"))
+        std::env::temp_dir().join(format!("imp-lab-save-{name}-{nanos}.json"))
     }
 
     #[test]

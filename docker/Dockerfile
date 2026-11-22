@@ -1,6 +1,5 @@
-# Experimental Imp Lab Tauri/dev image (repo-owned).
+# Imp Lab desktop host image (repo-owned; Bun + WebKitGTK).
 # Built from the workbench engine image via Compose additional_contexts.
-# Not the Iced path. Future: CI home / shared LCD base for product hosts.
 ARG BASE_IMAGE=aura-workbench-engine:local
 FROM ${BASE_IMAGE}
 
