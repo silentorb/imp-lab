@@ -57,6 +57,8 @@ Same shape as the Iced Aura Editor design:
 | Ctrl/Cmd+Shift+Z | `edit.redo` |
 | D / S / E / N | notation tool draw / select / erase / snap toggle |
 | Space | `play.toggle` (only when the Aura playback pack contributes that command) |
+| R | `notation.record.toggle` (start / stop a take; shown when a capture service is present) |
+| Ctrl/Cmd+, | `settings.open` (Edit → Settings…) |
 
 ## Runtime
 

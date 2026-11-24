@@ -51,7 +51,8 @@ pub struct ComponentConfig {
     pub extension_id: String,
     /// Component kind.
     pub kind: ComponentKind,
-    /// Implementation id registered by the extension package.
+    /// Implementation id registered by the extension package (unused by settings kinds).
+    #[serde(default)]
     pub implementation_id: String,
     /// Whether this component is active.
     #[serde(default = "default_true")]
@@ -79,6 +80,15 @@ pub enum ComponentKind {
     MenuItem,
     /// Long-lived host backend registered by the extension cdylib.
     Service,
+    /// One setting (id = component id); shown on the pages of the categories it is
+    /// associated with, or on the fallback page.
+    Setting,
+    /// A settings category, shown as one settings page.
+    SettingsCategory,
+    /// Associates a setting with a category (`params.settingId`, `params.categoryId`).
+    SettingsCategoryItem,
+    /// A toolbar / status-bar entry displaying a topic (`params.topic`).
+    StatusItem,
 }
 
 impl ComponentKind {
@@ -89,6 +99,10 @@ impl ComponentKind {
             Self::Command => "command",
             Self::MenuItem => "menu-item",
             Self::Service => "service",
+            Self::Setting => "setting",
+            Self::SettingsCategory => "settings-category",
+            Self::SettingsCategoryItem => "settings-category-item",
+            Self::StatusItem => "status-item",
         }
     }
 }

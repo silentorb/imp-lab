@@ -2,7 +2,7 @@
 
 ## Summary
 
-Imp Lab persists **editor UI chrome** across launches: open saved tabs, piano-roll tool/snap prefs, and main-window geometry. This is ordinary durable local UI state — not document content, not a general settings/config framework, and not a start/finish “session.”
+Imp Lab persists **editor UI chrome** across launches: open saved tabs, piano-roll tool/snap prefs, and main-window geometry. This is ordinary durable local UI state — not document content, not a start/finish “session.” It also stores extension setting values for the [Settings](settings.md) dialog.
 
 ## Location
 
@@ -27,7 +27,8 @@ Each bucket is `{config_dir}/{bucket}.json` with envelope:
 | Entry id | Bucket file | Shape |
 | --- | --- | --- |
 | `open-documents` | `documents.json` | optional `projectPath`, `openNodeIds` (string[]), optional `activeNodeId` |
-| `piano-roll-ui` | `ui.json` | `activeTool`, `snapEnabled`, `snapResolution`, `audition` |
+| `piano-roll-ui` | `ui.json` | `activeTool`, `snapEnabled`, `snapResolution`, `audition`, `click` |
+| `extension-settings` | `settings.json` | `{settingId: value}`: extension setting values, opaque to Lab ([settings](settings.md)) |
 | `records-ui` | `ui.json` | optional `lastNewRecordStore`, optional `explorerKindFilter` (`lab` \| `imp-graph` \| `notation` \| `all`) |
 | `window` | `window.json` | `width`, `height`, optional `x`/`y`, `maximized` |
 
@@ -48,8 +49,8 @@ Missing file, missing entry, unsupported `version`, or invalid JSON → defaults
 
 ### Piano roll UI
 
-- Global prefs (not per document): tool `draw` \| `select` \| `erase`, snap on/off, resolution `1/4` \| `1/8` \| `1/16` \| `1/32`, note audition on/off
-- Defaults: draw, snap on, `1/16`, audition on (entries saved without `audition` read as on)
+- Global prefs (not per document): tool `draw` \| `select` \| `erase`, snap on/off, resolution `1/4` \| `1/8` \| `1/16` \| `1/32`, note audition on/off, recording click (metronome + count-in) on/off
+- Defaults: draw, snap on, `1/16`, audition on, click on (entries saved without `audition` or `click` read as on)
 - Collect on tool / snap / audition changes; apply once at startup
 
 ### Window

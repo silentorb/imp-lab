@@ -30,3 +30,8 @@ export const EDITOR_COMMAND_EVENT = "editor://command";
 export type EditorCommandPayload = {
   id: string;
 };
+
+/** Lab settings dialog (extension settings, one page per category). */
+export const CMD_SETTINGS_OPEN = "settings.open";
+/** Start / stop recording a take into the active notation. */
+export const CMD_NOTATION_RECORD_TOGGLE = "notation.record.toggle";

@@ -34,6 +34,8 @@ pub const BUILTIN_COMMAND_IDS: &[&str] = &[
     "notation.tool.select",
     "notation.tool.erase",
     "notation.snap.toggle",
+    "notation.record.toggle",
+    "settings.open",
 ];
 
 static BINDINGS: OnceLock<Bindings> = OnceLock::new();

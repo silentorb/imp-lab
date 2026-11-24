@@ -1,4 +1,17 @@
-export { PianoRollPanel, type PianoRollPanelProps, type PianoRollUiPrefs } from "./PianoRollPanel";
+export {
+  PianoRollPanel,
+  type PianoRollPanelProps,
+  type PianoRollRecording,
+  type PianoRollUiPrefs,
+} from "./PianoRollPanel";
+export {
+  applyTake,
+  createRecordingController,
+  IDLE_TAKE,
+  takeFromTopic,
+  type RecordingController,
+  type TakeState,
+} from "./recording";
 export {
   AUDITION_SERVICE_ID,
   createAuditionController,

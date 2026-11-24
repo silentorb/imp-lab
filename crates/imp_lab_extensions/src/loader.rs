@@ -191,6 +191,26 @@ impl ExtensionsRuntime {
         drop(services);
         unsafe { crate::service::send_service_event(&vtable, json) }
     }
+
+    /// Send a service-defined JSON request and return the reply.
+    pub fn request(
+        &self,
+        implementation_id: &str,
+        json: &str,
+    ) -> Result<String, CommandDispatchError> {
+        let services = self
+            .services
+            .lock()
+            .map_err(|_| CommandDispatchError::ServiceFailed("service registry poisoned".into()))?;
+        let vtable = services
+            .get(implementation_id)
+            .copied()
+            .ok_or_else(|| {
+                CommandDispatchError::ServiceNotRegistered(implementation_id.to_string())
+            })?;
+        drop(services);
+        unsafe { crate::service::send_service_request(&vtable, json) }
+    }
 }
 
 /// Serde-friendly config mirror for the frontend (keeps camelCase).

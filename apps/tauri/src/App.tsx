@@ -49,7 +49,11 @@ import {
   CMD_RECORDS_FOCUS_FILTER,
   CMD_EDIT_REDO,
   CMD_EDIT_UNDO,
+  CMD_NOTATION_RECORD_TOGGLE,
   CMD_NOTATION_SNAP_TOGGLE,
+  CMD_PLAY_STOP,
+  CMD_PLAY_TOGGLE,
+  CMD_SETTINGS_OPEN,
   CMD_NOTATION_TOOL_DRAW,
   CMD_NOTATION_TOOL_ERASE,
   CMD_NOTATION_TOOL_SELECT,
@@ -111,9 +115,12 @@ import {
 import { GraphErrorBoundary } from "./GraphErrorBoundary";
 import { LabGraphPanel } from "./LabGraphPanel";
 import {
+  applyTake,
   canRedoNotation,
   canUndoNotation,
   createAuditionController,
+  createRecordingController,
+  takeFromTopic,
   createNotationHistory,
   emptyNotation,
   isNotationDirty,
@@ -143,6 +150,19 @@ import {
   type PianoRollUiEntry,
   type RecordsUiEntry,
 } from "./userState";
+import { connectTopics, useTopic } from "./extensionTopics";
+import { SettingsModal } from "./settings/SettingsModal";
+import { StatusItems } from "./settings/StatusItems";
+import {
+  allSettings,
+  deliverSettings,
+  effectiveValues,
+  EMPTY_LAYOUT,
+  ENTRY_EXTENSION_SETTINGS,
+  type SettingsLayout,
+  type SettingValues,
+  type StatusItemDecl,
+} from "./settings/settingsStore";
 import classes from "./App.module.css";
 
 type ExtensionsLoadDto = {
@@ -224,6 +244,7 @@ const DEFAULT_PIANO_PREFS: PianoRollUiPrefs = {
   snapEnabled: true,
   snapResolution: "1/16",
   audition: true,
+  click: true,
 };
 
 /** Build tab + history state for a host-opened document DTO. */
@@ -317,6 +338,118 @@ export default function App() {
   useEffect(() => {
     auditionController.allOff();
   }, [activeId, auditionController]);
+
+  // Extension topics (pushed state) feed status items, live setting options, and takes.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void connectTopics(
+      (command) => invoke(command),
+      (event, handler) => listen(event, handler),
+    ).then((fn) => {
+      if (cancelled) {
+        fn();
+      } else {
+        unlisten = fn;
+      }
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  /** Extension settings: declarations, current values, and the dialog. */
+  const [settingsLayout, setSettingsLayout] = useState<SettingsLayout>(EMPTY_LAYOUT);
+  const settingsLayoutRef = useRef(settingsLayout);
+  settingsLayoutRef.current = settingsLayout;
+  const [settingValues, setSettingValues] = useState<SettingValues>({});
+  const settingValuesRef = useRef(settingValues);
+  settingValuesRef.current = settingValues;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsCategory, setSettingsCategory] = useState<string | null>(null);
+  const [statusItemDecls, setStatusItemDecls] = useState<StatusItemDecl[]>([]);
+
+  const openSettings = useCallback((categoryId: string | null) => {
+    setSettingsCategory(categoryId);
+    setSettingsOpen(true);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [layout, items, stored] = await Promise.all([
+          invoke<SettingsLayout>("get_settings_layout"),
+          invoke<StatusItemDecl[]>("get_status_items"),
+          getUserStateEntry<SettingValues>(ENTRY_EXTENSION_SETTINGS),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        for (const warning of layout.warnings ?? []) {
+          console.warn("imp-lab settings:", warning);
+        }
+        const values = effectiveValues(layout, stored);
+        setSettingsLayout(layout);
+        setStatusItemDecls(items);
+        setSettingValues(values);
+        await deliverSettings((command, args) => invoke(command, args), layout, values);
+      } catch (err) {
+        console.warn("extension settings unavailable", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const changeSetting = useCallback((settingId: string, value: unknown) => {
+    const layout = settingsLayoutRef.current;
+    const values = { ...settingValuesRef.current, [settingId]: value };
+    settingValuesRef.current = values;
+    setSettingValues(values);
+    void setUserStateEntry(ENTRY_EXTENSION_SETTINGS, values).catch((err: unknown) =>
+      console.warn("saving settings failed", err),
+    );
+    const serviceId = allSettings(layout).find((s) => s.id === settingId)?.serviceId;
+    if (serviceId) {
+      void deliverSettings((command, args) => invoke(command, args), layout, values, [
+        serviceId,
+      ]);
+    }
+  }, []);
+
+  const statusItems = (
+    <StatusItems items={statusItemDecls} onOpenCategory={openSettings} />
+  );
+
+  /** Live note capture (recording takes) through the playback service, when offered. */
+  const recordingController = useMemo(
+    () => createRecordingController((command, args) => invoke(command, args)),
+    [],
+  );
+  const [captureTopic, setCaptureTopic] = useState<string | null>(null);
+  useEffect(() => {
+    if (!extensionCommandIds.has(CMD_PLAY_START)) {
+      return;
+    }
+    let cancelled = false;
+    void recordingController.info().then((topic) => {
+      if (!cancelled) {
+        setCaptureTopic(topic);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [extensionCommandIds, recordingController]);
+  const [recordingDocId, setRecordingDocId] = useState<string | null>(null);
+  const recordingDocIdRef = useRef(recordingDocId);
+  recordingDocIdRef.current = recordingDocId;
+  const take = takeFromTopic(useTopic(captureTopic));
+  /** Whether the take topic has shown this take recording (to notice an external stop). */
+  const takeSeenRef = useRef(false);
   const [inputBindings, setInputBindings] = useState<BindingDto[]>([]);
   const inputBindingsRef = useRef(inputBindings);
   inputBindingsRef.current = inputBindings;
@@ -673,6 +806,86 @@ export default function App() {
     },
     [syncNotationFromHistory],
   );
+
+  /** Stops the take and adds its notes to the notation it was recorded into, as one edit. */
+  const stopRecording = useCallback(async () => {
+    const docId = recordingDocIdRef.current;
+    if (!docId) {
+      return;
+    }
+    recordingDocIdRef.current = null;
+    setRecordingDocId(null);
+    setNotationPlayingId(null);
+    setLivePlayheadBeats(null);
+    takeSeenRef.current = false;
+    try {
+      const notes = await recordingController.stop();
+      const doc = documentsRef.current.find((d) => d.id === docId);
+      if (doc?.notation && notes.length > 0) {
+        updateDocNotation(docId, applyTake(doc.notation, notes));
+        setStatus(`Recorded ${notes.length} note${notes.length === 1 ? "" : "s"}`);
+      } else {
+        setStatus("Recording stopped · no notes");
+      }
+    } catch (err) {
+      setStatus(`Recording failed · ${errorMessage(err)}`);
+    }
+  }, [recordingController, updateDocNotation]);
+
+  const toggleRecording = useCallback(async () => {
+    if (recordingDocIdRef.current) {
+      await stopRecording();
+      return;
+    }
+    if (!captureTopic) {
+      setStatus("Recording needs a playback extension pack");
+      return;
+    }
+    const docs = documentsRef.current;
+    const doc = docs.find((d) => d.id === activeId) ?? docs[0];
+    if (doc?.kind !== "notation" || !doc.notation) {
+      setStatus("Open a notation to record into");
+      return;
+    }
+    try {
+      auditionController.allOff();
+      const startBeats = playheadsRef.current[doc.id] ?? 0;
+      await recordingController.start(doc.notation, startBeats, pianoPrefs.click);
+      recordingDocIdRef.current = doc.id;
+      takeSeenRef.current = false;
+      setRecordingDocId(doc.id);
+      setNotationPlayingId(doc.id);
+      setStatus(pianoPrefs.click ? "Recording · count-in" : "Recording");
+    } catch (err) {
+      setStatus(`Recording failed · ${errorMessage(err)}`);
+    }
+  }, [
+    activeId,
+    auditionController,
+    captureTopic,
+    pianoPrefs.click,
+    recordingController,
+    stopRecording,
+  ]);
+
+  // The transport stopped some other way (menu Stop): collect the take.
+  useEffect(() => {
+    if (!recordingDocId) {
+      return;
+    }
+    if (take.recording) {
+      takeSeenRef.current = true;
+    } else if (takeSeenRef.current) {
+      void stopRecording();
+    }
+  }, [recordingDocId, stopRecording, take.recording]);
+
+  // Leaving the notation (tab switch or close) ends the take there.
+  useEffect(() => {
+    if (recordingDocIdRef.current && recordingDocIdRef.current !== activeId) {
+      void stopRecording();
+    }
+  }, [activeId, stopRecording]);
 
   const clearTitleCommitTimer = useCallback(() => {
     if (titleCommitTimer.current != null) {
@@ -1414,8 +1627,20 @@ export default function App() {
             return { ...p, snapEnabled };
           });
           break;
+        case CMD_SETTINGS_OPEN:
+          openSettings(null);
+          break;
+        case CMD_NOTATION_RECORD_TOGGLE:
+          void toggleRecording();
+          break;
         default:
-          if (extensionCommandIdsRef.current.has(id)) {
+          // Space (or Play › Stop) during a take ends the take and keeps its notes.
+          if (
+            recordingDocIdRef.current &&
+            (id === CMD_PLAY_TOGGLE || id === CMD_PLAY_STOP)
+          ) {
+            void stopRecording();
+          } else if (extensionCommandIdsRef.current.has(id)) {
             void runExtensionCommand(id);
           } else {
             setStatus(`Unhandled command · ${id}`);
@@ -1427,10 +1652,13 @@ export default function App() {
       activateProject,
       closeActive,
       duplicateActive,
+      openSettings,
       redoActive,
       runExtensionCommand,
       saveActive,
+      stopRecording,
       toggleColorScheme,
+      toggleRecording,
       undoActive,
     ],
   );
@@ -1830,6 +2058,19 @@ export default function App() {
                         }
                         prefs={pianoPrefs}
                         audition={audition}
+                        recording={
+                          captureTopic
+                            ? {
+                                active: recordingDocId === doc.id,
+                                countIn:
+                                  recordingDocId === doc.id && take.countIn,
+                                takeNotes:
+                                  recordingDocId === doc.id ? take.notes : [],
+                                onToggle: () => void toggleRecording(),
+                              }
+                            : null
+                        }
+                        toolbarExtra={statusItems}
                         onPrefsChange={setPianoPrefs}
                         onNotationChange={(notation, coalesceKey) =>
                           updateDocNotation(doc.id, notation, coalesceKey)
@@ -1871,11 +2112,23 @@ export default function App() {
           <Text size="xs" lineClamp={1}>
             {status}
           </Text>
-          <Text size="xs" c="dimmed">
-            {active?.dirty ? "dirty" : "saved"}
-          </Text>
+          <Group gap="sm" wrap="nowrap">
+            {statusItems}
+            <Text size="xs" c="dimmed">
+              {active?.dirty ? "dirty" : "saved"}
+            </Text>
+          </Group>
         </Group>
       </AppShell.Footer>
+
+      <SettingsModal
+        opened={settingsOpen}
+        layout={settingsLayout}
+        values={settingValues}
+        initialCategory={settingsCategory}
+        onChange={changeSetting}
+        onClose={() => setSettingsOpen(false)}
+      />
 
       <SaveTargetModal
         request={saveTarget?.request ?? null}

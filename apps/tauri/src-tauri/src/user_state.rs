@@ -29,12 +29,15 @@ pub const ENTRY_OPEN_DOCUMENTS: &str = "open-documents";
 pub const ENTRY_PIANO_ROLL_UI: &str = "piano-roll-ui";
 pub const ENTRY_RECORDS_UI: &str = "records-ui";
 pub const ENTRY_WINDOW: &str = "window";
+/// Extension setting values (`{settingId: value}`, opaque to Lab).
+pub const ENTRY_EXTENSION_SETTINGS: &str = "extension-settings";
 
 pub const BUCKET_DOCUMENTS: &str = "documents";
 pub const BUCKET_UI: &str = "ui";
 pub const BUCKET_WINDOW: &str = "window";
+pub const BUCKET_SETTINGS: &str = "settings";
 
-const KNOWN_BUCKETS: &[&str] = &[BUCKET_DOCUMENTS, BUCKET_UI, BUCKET_WINDOW];
+const KNOWN_BUCKETS: &[&str] = &[BUCKET_DOCUMENTS, BUCKET_UI, BUCKET_WINDOW, BUCKET_SETTINGS];
 
 /// Failure while reading or writing UI-state buckets.
 #[derive(Debug)]
@@ -210,6 +213,7 @@ impl UserStateStore {
             ENTRY_OPEN_DOCUMENTS => Some(BUCKET_DOCUMENTS),
             ENTRY_PIANO_ROLL_UI | ENTRY_RECORDS_UI => Some(BUCKET_UI),
             ENTRY_WINDOW => Some(BUCKET_WINDOW),
+            ENTRY_EXTENSION_SETTINGS => Some(BUCKET_SETTINGS),
             _ => None,
         }
     }
@@ -673,6 +677,22 @@ mod tests {
         assert!(text.contains("/b"));
         assert!(!text.contains("\"/a\""));
         let _ = fs::remove_dir_all(dir.path());
+    }
+
+    #[test]
+    fn extension_settings_live_in_the_settings_bucket() {
+        assert_eq!(
+            UserStateStore::bucket_for_entry(ENTRY_EXTENSION_SETTINGS),
+            Some(BUCKET_SETTINGS)
+        );
+        let mut store = UserStateStore::in_memory();
+        let values = serde_json::json!({"aura.midi.input": "Keys", "aura.midi.channels": ["1"]});
+        store
+            .set_entry(BUCKET_SETTINGS, ENTRY_EXTENSION_SETTINGS, &values)
+            .unwrap();
+        let loaded: serde_json::Value =
+            store.get_entry(BUCKET_SETTINGS, ENTRY_EXTENSION_SETTINGS).unwrap();
+        assert_eq!(loaded, values);
     }
 
     #[test]

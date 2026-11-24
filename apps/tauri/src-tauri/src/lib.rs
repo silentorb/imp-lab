@@ -71,6 +71,7 @@ pub fn run() {
                 user_state::apply_window_entry(app.handle(), &entry);
             }
             project::spawn_change_poller(app.handle().clone());
+            extensions::install_topic_sink(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -99,6 +100,10 @@ pub fn run() {
             extensions::run_extension_command,
             extensions::get_playback_status,
             extensions::send_service_event,
+            extensions::service_request,
+            extensions::get_topics,
+            extensions::get_settings_layout,
+            extensions::get_status_items,
             user_state::get_user_state_entry,
             user_state::set_user_state_entry,
             user_state::flush_user_state

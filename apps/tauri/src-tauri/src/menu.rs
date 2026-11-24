@@ -21,6 +21,7 @@ const CMD_DOCUMENT_CLOSE_ACTIVE: &str = "document.close_active";
 const CMD_EDIT_UNDO: &str = "edit.undo";
 const CMD_EDIT_REDO: &str = "edit.redo";
 const CMD_VIEW_TOGGLE_COLOR_SCHEME: &str = "view.toggle-color-scheme";
+const CMD_SETTINGS_OPEN: &str = "settings.open";
 
 /// Builds the global File / Edit / View menu bar, plus extension submenus.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -54,9 +55,12 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let undo = item(app, CMD_EDIT_UNDO, "Undo", bindings)?;
     let redo = item(app, CMD_EDIT_REDO, "Redo", bindings)?;
+    let settings = item(app, CMD_SETTINGS_OPEN, "Settings…", bindings)?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .item(&undo)
         .item(&redo)
+        .separator()
+        .item(&settings)
         .build()?;
 
     let toggle_theme = item(

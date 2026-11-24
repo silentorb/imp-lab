@@ -60,7 +60,28 @@ pub struct ImpLabServiceV0 {
             err_len: usize,
         ) -> c_int,
     >,
+    /// Answer a service-defined request (UTF-8 JSON in, UTF-8 JSON reply out; the host does
+    /// not interpret either). The reply is written to `out` (capacity `out_cap`) and its length
+    /// to `out_len`. Returns 0 on success, [`SERVICE_REPLY_TOO_SMALL`] with `out_len` set to the
+    /// needed size when `out` is too small, or another non-zero code with `err_out` on failure.
+    /// Optional.
+    pub request: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            json: *const c_uchar,
+            len: usize,
+            out: *mut c_uchar,
+            out_cap: usize,
+            out_len: *mut usize,
+            err_out: *mut c_char,
+            err_len: usize,
+        ) -> c_int,
+    >,
 }
+
+/// `request` return code: the reply buffer is too small; `out_len` holds the needed size.
+pub const SERVICE_REPLY_TOO_SMALL: c_int = 2;
+const INITIAL_REPLY_CAPACITY: usize = 16 * 1024;
 
 // Safety: service vtables are process-lifetime function pointers + opaque ctx owned by the extension.
 unsafe impl Send for ImpLabServiceV0 {}
@@ -396,6 +417,75 @@ pub unsafe fn send_service_event(
     Ok(())
 }
 
+/// Send a service-defined JSON request and return the service's JSON reply.
+///
+/// # Safety
+///
+/// `vtable` and its `ctx` must remain valid for the duration of the call.
+pub unsafe fn send_service_request(
+    vtable: &ImpLabServiceV0,
+    json: &str,
+) -> Result<String, CommandDispatchError> {
+    let Some(request) = vtable.request else {
+        return Err(CommandDispatchError::UnsupportedAction("request".into()));
+    };
+    let mut capacity = INITIAL_REPLY_CAPACITY;
+    // One retry at the size the service asked for.
+    for _ in 0..2 {
+        let mut out = vec![0u8; capacity];
+        let mut out_len = 0usize;
+        let mut err_buf = vec![0u8; 1024];
+        let code = request(
+            vtable.ctx,
+            json.as_ptr(),
+            json.len(),
+            out.as_mut_ptr(),
+            out.len(),
+            &mut out_len,
+            err_buf.as_mut_ptr() as *mut c_char,
+            err_buf.len(),
+        );
+        match code {
+            0 => {
+                out.truncate(out_len.min(out.len()));
+                return String::from_utf8(out).map_err(|_| {
+                    CommandDispatchError::ServiceFailed("reply is not UTF-8".into())
+                });
+            }
+            SERVICE_REPLY_TOO_SMALL if out_len > capacity => capacity = out_len,
+            _ => return Err(CommandDispatchError::ServiceFailed(read_err(&err_buf, code))),
+        }
+    }
+    Err(CommandDispatchError::ServiceFailed(
+        "reply kept growing past the requested size".into(),
+    ))
+}
+
+/// Extension-side helper for `request`: write `reply` into the host's buffer.
+///
+/// Returns 0, or [`SERVICE_REPLY_TOO_SMALL`] with `out_len` set to the needed size.
+///
+/// # Safety
+///
+/// `out` must point to `out_cap` writable bytes (or be null with `out_cap == 0`), and `out_len`
+/// must be null or writable.
+pub unsafe fn write_service_reply(
+    out: *mut c_uchar,
+    out_cap: usize,
+    out_len: *mut usize,
+    reply: &str,
+) -> c_int {
+    let bytes = reply.as_bytes();
+    if !out_len.is_null() {
+        *out_len = bytes.len();
+    }
+    if bytes.len() > out_cap || (out.is_null() && !bytes.is_empty()) {
+        return SERVICE_REPLY_TOO_SMALL;
+    }
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out, bytes.len());
+    0
+}
+
 fn read_err(buf: &[u8], code: c_int) -> String {
     let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     if nul == 0 {
@@ -540,6 +630,62 @@ mod tests {
             is_playing: None,
             position_secs: None,
             event: event.then_some(echo_event as EventFn),
+            request: None,
+        }
+    }
+
+    /// Replies `"<len>:" + "x" * len` for request text `len`, or an error for `"fail"`.
+    unsafe extern "C" fn sized_request(
+        _ctx: *mut c_void,
+        json: *const c_uchar,
+        len: usize,
+        out: *mut c_uchar,
+        out_cap: usize,
+        out_len: *mut usize,
+        err_out: *mut c_char,
+        err_len: usize,
+    ) -> c_int {
+        let text = std::str::from_utf8(std::slice::from_raw_parts(json, len)).unwrap();
+        if text == "fail" {
+            write_service_error(err_out, err_len, "request failed");
+            return -1;
+        }
+        let size: usize = text.parse().unwrap();
+        write_service_reply(out, out_cap, out_len, &"x".repeat(size))
+    }
+
+    fn vtable_with_request(request: bool) -> ImpLabServiceV0 {
+        type RequestFn = unsafe extern "C" fn(
+            *mut c_void,
+            *const c_uchar,
+            usize,
+            *mut c_uchar,
+            usize,
+            *mut usize,
+            *mut c_char,
+            usize,
+        ) -> c_int;
+        ImpLabServiceV0 {
+            request: request.then_some(sized_request as RequestFn),
+            ..vtable_with_event(false)
+        }
+    }
+
+    #[test]
+    fn requests_return_replies_growing_the_buffer_once() {
+        let vtable = vtable_with_request(true);
+        unsafe {
+            assert_eq!(send_service_request(&vtable, "3"), Ok("xxx".into()));
+            let big = INITIAL_REPLY_CAPACITY * 3;
+            assert_eq!(send_service_request(&vtable, &big.to_string()).unwrap().len(), big);
+            assert_eq!(
+                send_service_request(&vtable, "fail"),
+                Err(CommandDispatchError::ServiceFailed("request failed".into()))
+            );
+            assert_eq!(
+                send_service_request(&vtable_with_request(false), "1"),
+                Err(CommandDispatchError::UnsupportedAction("request".into()))
+            );
         }
     }
 

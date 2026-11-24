@@ -4,6 +4,8 @@ mod config;
 mod host;
 mod loader;
 mod service;
+pub mod settings;
+pub mod topics;
 mod ts_json;
 
 pub use config::{
@@ -21,8 +23,10 @@ pub use loader::{
 };
 pub use service::{
     invoke_service_action, menu_contributions_from_config, resolve_command_action,
-    send_service_event, service_position_secs, write_service_error, CommandDispatchError,
-    ImpLabServiceV0, MenuItemContribution, RegisteredService, ResolvedCommandAction,
-    ServiceRegistry,
+    send_service_event, send_service_request, service_position_secs, write_service_error,
+    write_service_reply, CommandDispatchError, ImpLabServiceV0, MenuItemContribution,
+    RegisteredService, ResolvedCommandAction, ServiceRegistry, SERVICE_REPLY_TOO_SMALL,
 };
+pub use settings::{settings_layout, status_items, SettingsLayout, StatusItemDecl};
+pub use topics::{topic_hub, Publisher, PublishFn, TopicHub};
 pub use ts_json::imp_json_to_ts_camel;

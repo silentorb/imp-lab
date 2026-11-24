@@ -48,6 +48,14 @@
     {
       "command": "play.toggle",
       "when": { "type": "key", "key": "space" }
+    },
+    {
+      "command": "notation.record.toggle",
+      "when": { "type": "key", "key": "r" }
+    },
+    {
+      "command": "settings.open",
+      "when": { "type": "key", "key": ",", "modifiers": ["ctrl"] }
     }
   ]
 }

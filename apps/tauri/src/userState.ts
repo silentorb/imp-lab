@@ -26,6 +26,8 @@ export type PianoRollUiEntry = {
   snapResolution: string;
   /** Absent in entries saved before audition existed. */
   audition?: boolean;
+  /** Absent in entries saved before recording existed. */
+  click?: boolean;
 };
 
 export async function getUserStateEntry<T>(
@@ -47,6 +49,7 @@ export function pianoPrefsToEntry(prefs: PianoRollUiPrefs): PianoRollUiEntry {
     snapEnabled: prefs.snapEnabled,
     snapResolution: prefs.snapResolution,
     audition: prefs.audition,
+    click: prefs.click,
   };
 }
 
@@ -76,6 +79,7 @@ export function pianoEntryToPrefs(
     snapResolution,
     audition:
       typeof entry.audition === "boolean" ? entry.audition : fallback.audition,
+    click: typeof entry.click === "boolean" ? entry.click : fallback.click,
   };
 }
 

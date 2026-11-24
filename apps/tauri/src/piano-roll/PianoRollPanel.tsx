@@ -1,7 +1,8 @@
 /** Piano-roll editor for Aura notation documents. */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  Button,
   Checkbox,
   Group,
   SegmentedControl,
@@ -17,6 +18,7 @@ import {
   semitoneLabel,
   SNAP_RESOLUTIONS,
   type Notation,
+  type NotationNote,
   type NotationTool,
   type SnapResolution,
 } from "./notation";
@@ -38,6 +40,17 @@ export type PianoRollUiPrefs = {
   snapResolution: SnapResolution;
   /** Sound notes while they are placed, pressed, or dragged. */
   audition: boolean;
+  /** Metronome click and one-bar count-in while recording. */
+  click: boolean;
+};
+
+/** Live recording state; `null` when no service offers capture. */
+export type PianoRollRecording = {
+  active: boolean;
+  countIn: boolean;
+  /** The take so far, drawn over the notation. */
+  takeNotes: NotationNote[];
+  onToggle: () => void;
 };
 
 export type PianoRollPanelProps = {
@@ -46,6 +59,9 @@ export type PianoRollPanelProps = {
   prefs: PianoRollUiPrefs;
   /** Live note audition; `null` when no playback service is loaded. */
   audition: AuditionController | null;
+  recording: PianoRollRecording | null;
+  /** Extra toolbar content (extension status items). */
+  toolbarExtra?: ReactNode;
   onPrefsChange: (prefs: PianoRollUiPrefs) => void;
   onNotationChange: (notation: Notation, coalesceKey?: string) => void;
   onPlayheadChange: (beats: number) => void;
@@ -136,10 +152,16 @@ export function PianoRollPanel({
   playheadBeats,
   prefs,
   audition,
+  recording,
+  toolbarExtra,
   onPrefsChange,
   onNotationChange,
   onPlayheadChange,
 }: PianoRollPanelProps) {
+  const recordingActive = recording?.active ?? false;
+  const recordingActiveRef = useRef(recordingActive);
+  recordingActiveRef.current = recordingActive;
+  const takeNotes = recording?.takeNotes;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [offsetX, setOffsetX] = useState(0);
@@ -245,6 +267,7 @@ export function PianoRollPanel({
     const noteSelected = dark ? "#ff922b" : "#f76707";
     const text = dark ? "#c1c2c5" : "#495057";
     const playhead = dark ? "#fa5252" : "#e03131";
+    const takeFill = dark ? "#ff6b6b" : "#f03e3e";
 
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, size.w, size.h);
@@ -314,6 +337,22 @@ export function PianoRollPanel({
       ctx.fillRect(x, y, w, h);
     });
 
+    // Take in progress (recording): translucent, over the notation.
+    if (takeNotes && takeNotes.length > 0) {
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = takeFill;
+      for (const note of takeNotes) {
+        if (note.semitone < PITCH_MIN || note.semitone > PITCH_MAX) {
+          continue;
+        }
+        const x = beatsToX(note.startBeats, offsetX, scale);
+        const w = Math.max(2, note.durationBeats * BEAT_WIDTH * scale);
+        const y = pitchToY(note.semitone, offsetY, scale);
+        ctx.fillRect(x, y, w, KEY_HEIGHT * scale - 1);
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // Ruler strip
     ctx.fillStyle = dark ? "#25262b" : "#e9ecef";
     ctx.fillRect(PIANO_WIDTH, 0, size.w - PIANO_WIDTH, RULER_HEIGHT);
@@ -357,6 +396,7 @@ export function PianoRollPanel({
     selectedNote,
     size.h,
     size.w,
+    takeNotes,
   ]);
 
   useEffect(() => {
@@ -386,6 +426,11 @@ export function PianoRollPanel({
     }
 
     if (event.button !== 0) {
+      return;
+    }
+
+    // The notation is read-only while a take records (pan still works).
+    if (recordingActiveRef.current) {
       return;
     }
 
@@ -638,9 +683,41 @@ export function PianoRollPanel({
             }}
           />
         </Group>
+        {recording ? (
+          <Group gap={6}>
+            <Button
+              size="compact-xs"
+              color="red"
+              variant={recordingActive ? "filled" : "light"}
+              title={
+                recordingActive
+                  ? "Stop recording and add the take (R)"
+                  : "Record from the playhead (R)"
+              }
+              onClick={recording.onToggle}
+            >
+              {recordingActive
+                ? recording.countIn
+                  ? "● Count-in…"
+                  : "■ Stop"
+                : "● Record"}
+            </Button>
+            <Checkbox
+              size="xs"
+              label="Click"
+              title="Metronome and one-bar count-in while recording"
+              disabled={recordingActive}
+              checked={prefs.click}
+              onChange={(event) =>
+                onPrefsChange({ ...prefs, click: event.currentTarget.checked })
+              }
+            />
+          </Group>
+        ) : null}
+        {toolbarExtra}
         <Text size="xs" c="dimmed">
-          D/S/E tools · N snap · middle-drag pan · wheel zoom · ruler sets
-          playhead
+          D/S/E tools · N snap · R record · middle-drag pan · wheel zoom · ruler
+          sets playhead
         </Text>
       </div>
       <div className={classes.canvasWrap} ref={wrapRef}>

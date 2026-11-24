@@ -1,6 +1,7 @@
 //! Host ABI for dynamically linked Lab extensions (lockstep with Lab).
 
 use crate::service::{cstr_to_string, ImpLabServiceV0, ServiceRegistry};
+use crate::topics::{host_publish, topic_hub, PublishFn, Publisher, TopicHub};
 use serde_json::Value;
 use std::ffi::{c_char, c_int, c_void, CStr};
 use std::os::raw::c_uchar;
@@ -86,6 +87,19 @@ pub struct ImpLabHostV0 {
             service: *const ImpLabServiceV0,
         ) -> c_int,
     >,
+    /// Context for `publish`. Unlike `ctx`, it lives for the whole process, so an extension may
+    /// keep it (with `publish`) after registration.
+    pub publisher_ctx: *mut c_void,
+    /// Publish the latest value of a topic (see [`crate::topics`]). Callable from any thread
+    /// after registration; never waits on the UI. Optional.
+    pub publish: Option<PublishFn>,
+}
+
+impl ImpLabHostV0 {
+    /// The topic publisher this host offers, for an extension to keep.
+    pub fn publisher(&self) -> Option<Publisher> {
+        Publisher::new(self.publish, self.publisher_ctx)
+    }
 }
 
 /// Exported symbol name every Lab extension cdylib must provide.
@@ -196,6 +210,8 @@ pub fn host_vtable(host: &mut ExtensionHost) -> ImpLabHostV0 {
         add_graph_library_json: Some(add_graph_library_json),
         resolve_pack_path: Some(resolve_pack_path),
         register_service: Some(register_service),
+        publisher_ctx: topic_hub() as *const TopicHub as *mut c_void,
+        publish: Some(host_publish),
     }
 }
 
