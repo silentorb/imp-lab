@@ -29,6 +29,9 @@ imp_lab_extensions = { path = "../../../crates/imp_lab_extensions" }
 tome_db = { path = "../../../../tome-rust-server/crates/tome_db" }
 tome_flatfile = { path = "../../../../tome-rust-server/crates/tome_flatfile" }
 tome_graph_interfaces = { path = "../../../../tome-rust-server/crates/tome_graph_interfaces" }
+# Imp nodes a graph references, resolved from those stores (Imp graph sources).
+tome_imp = { path = "../../../../tome-rust-server/crates/tome_imp" }
+imp_core_types = { path = "../../../../imp-rs/crates/imp_core_types" }
 
 [dev-dependencies]
 tempfile = "3"

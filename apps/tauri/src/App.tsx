@@ -557,7 +557,8 @@ export default function App() {
     return active.graph.nodes[selectedNodeId] ?? null;
   }, [active?.graph, selectedNodeId]);
 
-  const selectedIsMissing =
+  // Selected node this document does not hold: another record's node, or an unresolved endpoint.
+  const selectedIsElsewhere =
     selectedNodeId != null &&
     active?.graph != null &&
     !(selectedNodeId in active.graph.nodes);
@@ -1700,14 +1701,14 @@ export default function App() {
                 );
               })}
             </Stack>
-          ) : selectedIsMissing ? (
+          ) : selectedIsElsewhere ? (
             <Stack gap={6}>
               <TextInput
                 size="xs"
                 label="Title"
                 value=""
                 disabled
-                placeholder="(missing)"
+                placeholder="(not in this graph)"
               />
               <Group gap="xs" justify="space-between" wrap="nowrap">
                 <Text size="xs" c="dimmed">
@@ -1722,7 +1723,7 @@ export default function App() {
                   Type
                 </Text>
                 <Text size="xs" ta="right" lineClamp={1}>
-                  (missing)
+                  (defined elsewhere)
                 </Text>
               </Group>
             </Stack>

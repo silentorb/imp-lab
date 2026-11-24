@@ -435,6 +435,33 @@ pub fn record_archive(state: State<'_, ProjectState>, node_id: String) -> Result
         .map_err(db_error)
 }
 
+/// Imp nodes for `ids`, resolved from the project's Tome stores: records that are members of a
+/// type hub listed in `node_types` (the hub id is the node type), and nodes embedded in graph
+/// records. Ids nothing resolves are left out; the graph view shows them as unresolved.
+pub fn resolve_nodes(
+    session: &TomeSession,
+    ids: &[String],
+    node_types: &[String],
+) -> Result<Vec<imp_core_types::Node>, String> {
+    let types: std::collections::BTreeSet<&str> = node_types.iter().map(String::as_str).collect();
+    let provider = tome_imp::from_session(session, |t| types.contains(t)).map_err(|e| e.to_string())?;
+    Ok(ids
+        .iter()
+        .filter_map(|id| imp_core_types::NodeProvider::get_node(&provider, id))
+        .map(std::borrow::Cow::into_owned)
+        .collect())
+}
+
+#[tauri::command]
+pub fn records_resolve_nodes(
+    state: State<'_, ProjectState>,
+    ids: Vec<String>,
+    node_types: Vec<String>,
+) -> Result<Vec<imp_core_types::Node>, String> {
+    let session = state.session()?;
+    resolve_nodes(&session, &ids, &node_types)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,5 +580,31 @@ mod tests {
         let doc = open_record(&reopened.session, &graph.record.node_id).unwrap();
         assert_eq!(doc.title, "Groove 2");
         assert!(dir.join("content/data/nodes").read_dir().unwrap().count() > 0);
+    }
+
+    #[test]
+    fn resolves_notation_records_and_nodes_of_other_graphs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = create_project_files(&tmp.path().join("lab"), "Lab").unwrap();
+        let project = open_project(&config_path, &tmp.path().join("cache")).unwrap();
+        let session = &project.session;
+        create_record(session, "Groove", "main", &graph_payload()).unwrap();
+        let notation = create_record(session, "Melody", "main", &notation_payload()).unwrap();
+        let notation_id = notation.record.node_id;
+
+        let ids = vec![notation_id.clone(), "a".to_string(), "nope".to_string()];
+        let types = vec![lab_model::NOTATION_TABLE_ID.to_string()];
+        let nodes = resolve_nodes(session, &ids, &types).unwrap();
+        assert_eq!(
+            nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(),
+            vec![notation_id.as_str(), "a"]
+        );
+        assert_eq!(nodes[0].node_type, lab_model::NOTATION_TABLE_ID);
+        assert_eq!(nodes[0].title.as_deref(), Some("Melody"));
+        assert_eq!(nodes[1].node_type, "imp.add");
+
+        // Without the notation type registered, the record is not an Imp node.
+        let nodes = resolve_nodes(session, &ids, &[]).unwrap();
+        assert_eq!(nodes.iter().map(|n| n.id.as_str()).collect::<Vec<_>>(), vec!["a"]);
     }
 }

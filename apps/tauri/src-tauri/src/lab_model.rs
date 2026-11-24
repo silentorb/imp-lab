@@ -15,6 +15,9 @@ use tome_graph_interfaces::{js_json_file, Node, Properties};
 /// Type table whose members are Imp graphs (column `graph`, `imp_graph`).
 pub const IMP_GRAPH_TABLE_ID: &str = "01M80M9GRAPH00000000000001";
 /// Type table whose members are notations (column `notation`, `json`).
+///
+/// Tome types are nodes, so this hub's id is also the Imp `NodeTypeId` of a notation record (Aura's
+/// `aura_imp::NOTATION_NODE_TYPE` defines its ports). Keep the two ids equal.
 pub const NOTATION_TABLE_ID: &str = "01M80M9N0TAT00000000000001";
 /// Set-trait relationship type written into new projects.
 pub const SET_TYPE_ID: &str = "01M80M9SET0000000000000001";

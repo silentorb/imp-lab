@@ -92,6 +92,7 @@ pub fn run() {
             records::record_save,
             records::record_rename,
             records::record_archive,
+            records::records_resolve_nodes,
             bindings::get_input_bindings,
             extensions::get_extensions_load,
             extensions::load_extensions_file,

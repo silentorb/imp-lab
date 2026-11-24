@@ -1,6 +1,7 @@
 /** Typed client for the host's project / record commands (Tome data sources). */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { Node as ImpNode } from "imp-core-types";
 import type { DocumentKind, DocumentSummaryDto, RecordRef } from "./documents";
 
 /** Host event fired after local writes and external file edits. */
@@ -88,6 +89,13 @@ export const recordCreate = (title: string, corpusId: string, payload: RecordPay
   invoke<SaveResult>("record_create", { title, corpusId, payload });
 export const recordSave = (nodeId: string, payload: RecordPayload) =>
   invoke<SaveResult>("record_save", { nodeId, payload });
+
+/**
+ * Imp nodes a graph references but does not hold, resolved from the project's Tome stores.
+ * `nodeTypes` are the registered node type ids (a notation record's type is its type hub).
+ */
+export const resolveRecordNodes = (ids: string[], nodeTypes: string[]) =>
+  invoke<ImpNode[]>("records_resolve_nodes", { ids, nodeTypes });
 export const recordRename = (nodeId: string, title: string) =>
   invoke<void>("record_rename", { nodeId, title });
 export const recordArchive = (nodeId: string) => invoke<void>("record_archive", { nodeId });
