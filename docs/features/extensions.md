@@ -189,6 +189,19 @@ Settings, categories, and their associations are separate kinds, so any extensio
 
 `implementationId` is optional for these kinds. Status items show in the status bar and the piano-roll toolbar, hidden until their topic has a value.
 
+### Node UI components
+
+An extension can declare UI for node types it knows (its own catalog types, say). Lab draws it in **Properties** without knowing what the node types mean. `get_node_ui` returns the declarations.
+
+| Kind | Fields |
+| --- | --- |
+| `node-literal-options` | `params`: `nodeType`, `port` (a literal input), `optionsTopic` (value `[{value, label}]`). Properties draws that literal as a searchable dropdown of the topic's options (a current value not among them stays listed, marked not found). A wired port keeps its plain field. |
+| `node-action` | `label` (button text); `params`: `nodeType`, `serviceId` (the service component that receives it), `action`, optional `editsTopic`, `order`. Properties shows a button for a selected node of that type. |
+
+Clicking an action sends `service_request` `{"type":"node_action","action","node":{id,type,inputs}}` to the service. A failed request (or a `{"error"}` reply) shows its message under the buttons.
+
+A service may then **edit the node** through the action's `editsTopic` (an extension opening a plugin editor saves the plugin's state into the node, say). The topic value is `{seq, session, node, inputs}`: Lab applies each new `seq` to the open graph holding node `node` (preferring the document the action was run from), setting each literal in `inputs` and removing those that are `null`. Edits that share a `session` are **one undo step**. An edit published before Lab subscribed is not replayed.
+
 ### Piano-roll recording
 
 With a capture service present, the piano-roll toolbar shows **Record** (`R`) and **Click** (metronome and one-bar count-in, persisted).

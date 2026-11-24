@@ -103,6 +103,7 @@ pub fn run() {
             extensions::service_request,
             extensions::get_topics,
             extensions::get_settings_layout,
+            extensions::get_node_ui,
             extensions::get_status_items,
             user_state::get_user_state_entry,
             user_state::set_user_state_entry,

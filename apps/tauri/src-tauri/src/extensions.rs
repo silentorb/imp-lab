@@ -1,8 +1,8 @@
 //! Load optional Lab extensions and expose catalogs / commands to the React host.
 
 use imp_lab_extensions::{
-    load_extensions_default, load_extensions_from_path, settings_layout, status_items, topic_hub,
-    ExtensionsLoadResult, ExtensionsRuntime, SettingsLayout, StatusItemDecl,
+    load_extensions_default, load_extensions_from_path, node_ui, settings_layout, status_items,
+    topic_hub, ExtensionsLoadResult, ExtensionsRuntime, NodeUi, SettingsLayout, StatusItemDecl,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -108,6 +108,16 @@ pub fn get_status_items() -> Vec<StatusItemDecl> {
         .config
         .as_ref()
         .map(status_items)
+        .unwrap_or_default()
+}
+
+/// Enabled `node-literal-options` and `node-action` components.
+#[tauri::command]
+pub fn get_node_ui() -> NodeUi {
+    cached_runtime()
+        .config
+        .as_ref()
+        .map(node_ui)
         .unwrap_or_default()
 }
 

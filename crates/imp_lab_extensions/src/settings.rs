@@ -100,7 +100,7 @@ pub struct SettingsLayout {
 }
 
 /// Enabled components of `kind` whose extension is enabled.
-fn enabled_components(
+pub(crate) fn enabled_components(
     config: &ExtensionsConfig,
     kind: ComponentKind,
 ) -> impl Iterator<Item = (&ComponentConfig, BTreeMap<String, Value>)> {
@@ -119,12 +119,12 @@ fn enabled_components(
     })
 }
 
-fn param_str(params: &BTreeMap<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn param_str(params: &BTreeMap<String, Value>, key: &str) -> Option<String> {
     params.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
 /// Service component id → its implementation id.
-fn service_implementation(config: &ExtensionsConfig, component_id: &str) -> Option<String> {
+pub(crate) fn service_implementation(config: &ExtensionsConfig, component_id: &str) -> Option<String> {
     enabled_components(config, ComponentKind::Service)
         .find(|(c, _)| c.id == component_id)
         .map(|(c, _)| c.implementation_id.clone())

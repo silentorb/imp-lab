@@ -152,7 +152,19 @@ import {
   type PianoRollUiEntry,
   type RecordsUiEntry,
 } from "./userState";
-import { connectTopics, useTopic } from "./extensionTopics";
+import { connectTopics, topicStore, useTopic } from "./extensionTopics";
+import {
+  actionsFor,
+  applyNodeEdit,
+  createEditSequencer,
+  editCoalesceKey,
+  editsTopics,
+  EMPTY_NODE_UI,
+  literalOptionsFor,
+  parseNodeEdit,
+  type NodeUi,
+} from "./nodeUi";
+import { LiteralOptionsSelect, NodeActions } from "./NodeUiControls";
 import { SettingsModal } from "./settings/SettingsModal";
 import { StatusItems } from "./settings/StatusItems";
 import {
@@ -374,6 +386,27 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<string | null>(null);
   const [statusItemDecls, setStatusItemDecls] = useState<StatusItemDecl[]>([]);
+  const [nodeUi, setNodeUi] = useState<NodeUi>(EMPTY_NODE_UI);
+  /** Node id → the document a node action was last run from, where its edits go first. */
+  const actionDocs = useRef(new Map<string, string>());
+
+  useEffect(() => {
+    let cancelled = false;
+    invoke<NodeUi>("get_node_ui")
+      .then((ui) => {
+        if (cancelled) {
+          return;
+        }
+        for (const warning of ui.warnings ?? []) {
+          console.warn("imp-lab node UI:", warning);
+        }
+        setNodeUi(ui);
+      })
+      .catch((err) => console.warn("extension node UI unavailable", err));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const openSettings = useCallback((categoryId: string | null) => {
     setSettingsCategory(categoryId);
@@ -954,6 +987,42 @@ export default function App() {
     },
     [activeId, documents, selectedNodeId, updateDocGraph],
   );
+
+  // Services edit nodes they acted on (a plugin GUI saving its state) through edits topics.
+  // Each new edit applies to the open graph holding the node; one session is one undo step.
+  useEffect(() => {
+    const sequencer = createEditSequencer();
+    const unsubscribes = editsTopics(nodeUi).map((topic) => {
+      // An edit published before Lab subscribed is not replayed.
+      const current = parseNodeEdit(topicStore.get(topic));
+      if (current) {
+        sequencer.accept(topic, current);
+      }
+      return topicStore.subscribe(topic, () => {
+        const edit = parseNodeEdit(topicStore.get(topic));
+        if (!edit || !sequencer.accept(topic, edit)) {
+          return;
+        }
+        const docs = documentsRef.current;
+        const preferred = actionDocs.current.get(edit.node);
+        const doc =
+          docs.find((d) => d.id === preferred && d.graph?.nodes[edit.node]) ??
+          docs.find((d) => d.graph?.nodes[edit.node]);
+        if (!doc?.graph) {
+          return;
+        }
+        const next = applyNodeEdit(doc.graph, edit);
+        if (next !== doc.graph) {
+          updateDocGraph(doc.id, next, editCoalesceKey(topic, edit));
+        }
+      });
+    });
+    return () => {
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    };
+  }, [nodeUi, updateDocGraph]);
 
   const onGraphSelectionChange = useCallback(
     (selection: GraphSelection) => {
@@ -1895,6 +1964,27 @@ export default function App() {
                 const wired = selectedWiredPorts.has(port.id);
                 const stored = selectedLocalNode.inputs[port.id];
                 const label = wired ? `${port.id} (wired)` : port.id;
+                const options = literalOptionsFor(
+                  nodeUi,
+                  selectedLocalNode.type,
+                  port.id,
+                );
+                if (options && !wired) {
+                  return (
+                    <LiteralOptionsSelect
+                      key={port.id}
+                      label={label}
+                      topic={options.optionsTopic}
+                      value={typeof stored === "string" ? stored : ""}
+                      onChange={(value) =>
+                        commitSelectedLiteral(
+                          port.id,
+                          value === "" ? undefined : value,
+                        )
+                      }
+                    />
+                  );
+                }
                 if (kind === "boolean") {
                   return (
                     <Checkbox
@@ -1935,6 +2025,20 @@ export default function App() {
                   />
                 );
               })}
+              {actionsFor(nodeUi, selectedLocalNode.type).length > 0 && active.graph ? (
+                <NodeActions
+                  actions={actionsFor(nodeUi, selectedLocalNode.type)}
+                  node={{
+                    id: selectedLocalNode.id,
+                    type: selectedLocalNode.type,
+                    inputs: selectedLocalNode.inputs,
+                  }}
+                  invoke={(command, args) => invoke(command, args)}
+                  onRun={() =>
+                    actionDocs.current.set(selectedLocalNode.id, active.id)
+                  }
+                />
+              ) : null}
             </Stack>
           ) : selectedIsElsewhere ? (
             <Stack gap={6}>

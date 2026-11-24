@@ -89,6 +89,12 @@ pub enum ComponentKind {
     SettingsCategoryItem,
     /// A toolbar / status-bar entry displaying a topic (`params.topic`).
     StatusItem,
+    /// Dropdown options for one literal input of a node type, from a topic
+    /// (`params.nodeType`, `params.port`, `params.optionsTopic`).
+    NodeLiteralOptions,
+    /// A button in Properties for nodes of a type that sends a service request
+    /// (`params.nodeType`, `params.serviceId`, `params.action`, optional `params.editsTopic`).
+    NodeAction,
 }
 
 impl ComponentKind {
@@ -103,6 +109,8 @@ impl ComponentKind {
             Self::SettingsCategory => "settings-category",
             Self::SettingsCategoryItem => "settings-category-item",
             Self::StatusItem => "status-item",
+            Self::NodeLiteralOptions => "node-literal-options",
+            Self::NodeAction => "node-action",
         }
     }
 }

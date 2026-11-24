@@ -3,6 +3,7 @@
 mod config;
 mod host;
 mod loader;
+pub mod node_ui;
 mod service;
 pub mod settings;
 pub mod topics;
@@ -27,6 +28,7 @@ pub use service::{
     write_service_reply, CommandDispatchError, ImpLabServiceV0, MenuItemContribution,
     RegisteredService, ResolvedCommandAction, ServiceRegistry, SERVICE_REPLY_TOO_SMALL,
 };
+pub use node_ui::{node_ui, NodeActionDecl, NodeEdit, NodeLiteralOptionsDecl, NodeUi};
 pub use settings::{settings_layout, status_items, SettingsLayout, StatusItemDecl};
 pub use topics::{topic_hub, Publisher, PublishFn, TopicHub};
 pub use ts_json::imp_json_to_ts_camel;
