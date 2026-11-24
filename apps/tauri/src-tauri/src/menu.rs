@@ -22,6 +22,10 @@ const CMD_EDIT_UNDO: &str = "edit.undo";
 const CMD_EDIT_REDO: &str = "edit.redo";
 const CMD_VIEW_TOGGLE_COLOR_SCHEME: &str = "view.toggle-color-scheme";
 const CMD_SETTINGS_OPEN: &str = "settings.open";
+const CMD_RECORDS_SEARCH: &str = "records.search";
+/// No default binding: the graph view opens its picker on Shift+A itself, and a native
+/// Shift+A accelerator would swallow capital A in text fields.
+const CMD_GRAPH_ADD_NODE: &str = "graph.add-node";
 
 /// Builds the global File / Edit / View menu bar, plus extension submenus.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -55,10 +59,13 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     let undo = item(app, CMD_EDIT_UNDO, "Undo", bindings)?;
     let redo = item(app, CMD_EDIT_REDO, "Redo", bindings)?;
+    let add_node = item(app, CMD_GRAPH_ADD_NODE, "Add Node…", bindings)?;
     let settings = item(app, CMD_SETTINGS_OPEN, "Settings…", bindings)?;
     let edit = SubmenuBuilder::new(app, "Edit")
         .item(&undo)
         .item(&redo)
+        .separator()
+        .item(&add_node)
         .separator()
         .item(&settings)
         .build()?;
@@ -69,7 +76,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         "Toggle light/dark",
         bindings,
     )?;
+    let go_to_record = item(app, CMD_RECORDS_SEARCH, "Go to Record…", bindings)?;
     let view = SubmenuBuilder::new(app, "View")
+        .item(&go_to_record)
+        .separator()
         .item(&toggle_theme)
         .build()?;
 

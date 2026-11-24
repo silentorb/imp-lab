@@ -1,0 +1,9 @@
+/* imp-graph-view SearchModal (record search, add-node picker) in Mantine colors. */
+:root {
+  --imp-gv-search-bg: var(--mantine-color-body);
+  --imp-gv-search-fg: var(--mantine-color-text);
+  --imp-gv-search-border: var(--mantine-color-default-border);
+  --imp-gv-search-muted: var(--mantine-color-dimmed);
+  --imp-gv-search-active-bg: var(--mantine-primary-color-light);
+  --imp-gv-search-error: var(--mantine-color-error);
+}

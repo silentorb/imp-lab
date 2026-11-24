@@ -26,6 +26,8 @@ pub const BUILTIN_COMMAND_IDS: &[&str] = &[
     "project.new",
     "project.manage-stores",
     "records.focus-filter",
+    "records.search",
+    "graph.add-node",
     "document.close_active",
     "edit.undo",
     "edit.redo",

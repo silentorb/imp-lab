@@ -120,7 +120,7 @@ Rules:
 
 ### `imp-catalog`
 
-Registers Imp `NodeLibrary`, `TypeConstraintLibrary`, and/or `GraphLibrary` catalogs into the host registry (Add palette, ports, literals). Implementations live in the extension cdylib and call the Lab register entrypoint.
+Registers Imp `NodeLibrary`, `TypeConstraintLibrary`, and/or `GraphLibrary` catalogs into the host registry (add-node picker, ports, literals). Implementations live in the extension cdylib and call the Lab register entrypoint.
 
 ### `command`
 

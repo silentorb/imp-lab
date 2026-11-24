@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useMantineColorScheme } from "@mantine/core";
 import type { Edge } from "@xyflow/react";
 import {
@@ -14,8 +14,10 @@ import {
   applyGraphEdits,
   graphWithUnresolvedStubs,
   unresolvedNodeIds,
+  type AddableNodeType,
   type GraphEdit,
   type GraphSelection,
+  type ImpGraphViewHandle,
   type LayoutBox,
   type ResolvePorts,
 } from "imp-graph-view";
@@ -34,7 +36,20 @@ type LabGraphPanelProps = {
   onSelectionChange?: (selection: GraphSelection) => void;
   /** Stable per document tab — fits once on open, not on every topology edit. */
   fitViewKey?: string;
+  /** Host commands (e.g. `graph.add-node`) drive the view through this. */
+  ref?: Ref<ImpGraphViewHandle>;
 };
+
+/** Registry node types for the add-node picker, one entry per id. */
+function addableNodeTypes(registry: Registry): AddableNodeType[] {
+  const byId = new Map<string, AddableNodeType>();
+  for (const definition of listNodeDefinitions(registry)) {
+    if (!byId.has(definition.id)) {
+      byId.set(definition.id, { id: definition.id, name: definition.name });
+    }
+  }
+  return [...byId.values()];
+}
 
 /**
  * Nodes the document references but does not hold, resolved from the open project's Tome
@@ -74,8 +89,10 @@ export function LabGraphPanel({
   onGraphChange,
   onSelectionChange,
   fitViewKey,
+  ref,
 }: LabGraphPanelProps) {
   const { colorScheme } = useMantineColorScheme();
+  const nodeTypes = useMemo(() => addableNodeTypes(registry), [registry]);
   const [layout, setLayout] = useState<Map<string, LayoutBox>>(new Map());
   const remoteNodes = useRemoteNodes(graph, registry);
 
@@ -169,7 +186,9 @@ export function LabGraphPanel({
   return (
     <div className={classes.root}>
       <ImpGraphView
+        ref={ref}
         source={source}
+        addableNodeTypes={nodeTypes}
         onEdit={onEdit}
         onSelectionChange={onSelectionChange}
         resolvePorts={resolve}

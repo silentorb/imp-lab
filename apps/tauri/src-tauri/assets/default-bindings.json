@@ -10,6 +10,10 @@
       "when": { "type": "key", "key": "p", "modifiers": ["ctrl"] }
     },
     {
+      "command": "records.search",
+      "when": { "type": "key", "key": "k", "modifiers": ["ctrl"] }
+    },
+    {
       "command": "document.close_active",
       "when": { "type": "key", "key": "w", "modifiers": ["ctrl"] }
     },

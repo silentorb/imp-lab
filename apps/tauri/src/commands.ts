@@ -4,6 +4,10 @@ export const CMD_PROJECT_NEW = "project.new";
 export const CMD_PROJECT_OPEN = "project.open";
 export const CMD_PROJECT_MANAGE_STORES = "project.manage-stores";
 export const CMD_RECORDS_FOCUS_FILTER = "records.focus-filter";
+/** Quick-open over the project's records (scales past browsing the explorer). */
+export const CMD_RECORDS_SEARCH = "records.search";
+/** Open the active graph's node-type picker. */
+export const CMD_GRAPH_ADD_NODE = "graph.add-node";
 export const CMD_DOCUMENT_NEW_GRAPH = "document.new.graph";
 export const CMD_DOCUMENT_NEW_NOTATION = "document.new.notation";
 export const CMD_DOCUMENT_SAVE = "document.save";

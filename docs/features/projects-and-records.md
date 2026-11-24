@@ -51,6 +51,10 @@ The left panel lists the project's stores, each with its access, a primary badge
 - **Row menu.** Rename, Duplicate to store… and Archive. Archiving moves the files under the store's `archive/`.
 - **The + button** on a writable store creates an empty graph or notation directly in that store.
 
+## Go to Record
+
+View → Go to Record… (Ctrl+K) opens a search over the project's graphs and notations across every store, so you can reach a record without browsing the explorer. With an empty query it lists the most recently modified records. Typing filters by title on the host (`records_list` text filter) and ranks prefix and word-start matches first. Enter or a click opens the record, or switches to its tab if it is already open. Up to 50 results are shown; narrow the query to reach the rest.
+
 ## Saving
 
 - **Save on a record** overwrites its body (`record_save`).

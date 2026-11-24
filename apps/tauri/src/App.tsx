@@ -19,7 +19,6 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { Graph, Port, PrimitiveValue } from "imp-core-types";
 import {
-  addImpNode,
   formatLiteralValue,
   isLiteralEditableSignalType,
   literalEditorKind,
@@ -27,10 +26,10 @@ import {
   setNodeInputLiteral,
   setNodeTitle,
   type GraphSelection,
+  type ImpGraphViewHandle,
 } from "imp-graph-view";
 import {
   getNodeDefinition,
-  listNodeDefinitions,
   type Registry,
 } from "imp-registry";
 import {
@@ -47,6 +46,8 @@ import {
   CMD_PROJECT_NEW,
   CMD_PROJECT_OPEN,
   CMD_RECORDS_FOCUS_FILTER,
+  CMD_RECORDS_SEARCH,
+  CMD_GRAPH_ADD_NODE,
   CMD_EDIT_REDO,
   CMD_EDIT_UNDO,
   CMD_NOTATION_RECORD_TOGGLE,
@@ -107,6 +108,7 @@ import {
   type SaveResult,
 } from "./records";
 import { RecordExplorer } from "./RecordExplorer";
+import { RecordSearch } from "./RecordSearch";
 import {
   ManageStoresModal,
   SaveTargetModal,
@@ -315,6 +317,9 @@ export default function App() {
   const [kindFilter, setKindFilter] = useState<ExplorerKindFilter>("lab");
   const [filterText, setFilterText] = useState("");
   const filterRef = useRef<HTMLInputElement | null>(null);
+  const [recordSearchOpen, setRecordSearchOpen] = useState(false);
+  /** Graph view per open graph tab, for commands that act on the active canvas. */
+  const graphViewHandles = useRef(new Map<string, ImpGraphViewHandle>());
   const [lastNewRecordStore, setLastNewRecordStore] = useState<string | null>(null);
   const [saveTarget, setSaveTarget] = useState<SaveTargetState | null>(null);
   const [manageStoresOpen, setManageStoresOpen] = useState(false);
@@ -686,13 +691,6 @@ export default function App() {
       console.warn("user-state: persist piano-roll-ui failed", err);
     });
   }, [pianoPrefs]);
-
-  const paletteTypes = useMemo(() => {
-    const ids = new Set(
-      listNodeDefinitions(registry).map((definition) => definition.id),
-    );
-    return [...ids].sort();
-  }, [registry]);
 
   const active = useMemo(
     () => documents.find((doc) => doc.id === activeId) ?? documents[0],
@@ -1452,19 +1450,16 @@ export default function App() {
     syncNotationFromHistory,
   ]);
 
-  const addNodeToActive = useCallback(
-    (typeId: string) => {
-      const doc = documents.find((d) => d.id === activeId) ?? documents[0];
-      if (!doc || doc.kind !== "imp-graph") {
-        setStatus("Open or create a graph first");
-        return;
-      }
-      const next = addImpNode(doc.graph ?? emptyImpGraph(), typeId);
-      updateDocGraph(doc.id, next);
-      setStatus(`Added · ${typeId}`);
-    },
-    [activeId, documents, updateDocGraph],
-  );
+  /** Opens the active graph's node-type picker (the graph view also opens it on Shift+A). */
+  const openAddNodeInActive = useCallback(() => {
+    const docs = documentsRef.current;
+    const doc = docs.find((d) => d.id === activeId) ?? docs[0];
+    if (!doc || doc.kind !== "imp-graph") {
+      setStatus("Open or create a graph first");
+      return;
+    }
+    graphViewHandles.current.get(doc.id)?.openAddNode();
+  }, [activeId]);
 
   const runExtensionCommand = useCallback(
     async (id: string) => {
@@ -1565,6 +1560,12 @@ export default function App() {
           filterRef.current?.focus();
           filterRef.current?.select();
           break;
+        case CMD_RECORDS_SEARCH:
+          setRecordSearchOpen(true);
+          break;
+        case CMD_GRAPH_ADD_NODE:
+          openAddNodeInActive();
+          break;
         case CMD_DOCUMENT_SAVE:
           void saveActive();
           break;
@@ -1652,6 +1653,7 @@ export default function App() {
       activateProject,
       closeActive,
       duplicateActive,
+      openAddNodeInActive,
       openSettings,
       redoActive,
       runExtensionCommand,
@@ -1812,27 +1814,16 @@ export default function App() {
           onNewProject={() => dispatchCommand(CMD_PROJECT_NEW)}
           onManageStores={() => dispatchCommand(CMD_PROJECT_MANAGE_STORES)}
         />
+        <RecordSearch
+          open={recordSearchOpen}
+          onClose={() => setRecordSearchOpen(false)}
+          project={project}
+          onOpen={(record) => void openRecord(record.nodeId)}
+        />
       </AppShell.Navbar>
 
       <AppShell.Aside className={classes.aside} p="sm">
         <Stack gap="xs">
-          {active?.kind !== "notation" ? (
-            <>
-              <Title order={6}>Add node</Title>
-              <Group gap={6}>
-                {paletteTypes.map((typeId) => (
-                  <Button
-                    key={typeId}
-                    size="compact-xs"
-                    variant="light"
-                    onClick={() => addNodeToActive(typeId)}
-                  >
-                    {typeId}
-                  </Button>
-                ))}
-              </Group>
-            </>
-          ) : null}
           <Title order={6}>Properties</Title>
           {!active ? (
             <Text size="xs" c="dimmed">
@@ -2085,6 +2076,10 @@ export default function App() {
                     ) : (
                       <GraphErrorBoundary resetKey={doc.id}>
                         <LabGraphPanel
+                          ref={(handle) => {
+                            if (handle) graphViewHandles.current.set(doc.id, handle);
+                            else graphViewHandles.current.delete(doc.id);
+                          }}
                           graph={doc.graph ?? emptyImpGraph()}
                           registry={registry}
                           fitViewKey={doc.id}

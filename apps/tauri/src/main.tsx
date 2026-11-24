@@ -5,6 +5,7 @@ import {
   MantineProvider,
 } from "@mantine/core";
 import "@mantine/core/styles.css";
+import "./searchTheme.css";
 import App from "./App";
 import { theme } from "./theme";
 
