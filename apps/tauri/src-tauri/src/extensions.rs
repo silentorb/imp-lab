@@ -56,6 +56,15 @@ pub fn get_playback_status() -> Result<PlaybackStatusDto, String> {
     })
 }
 
+/// Deliver a service-defined JSON event (for example a live note on / off for the playback
+/// service) to a registered service implementation id. Lab does not interpret the event.
+#[tauri::command]
+pub fn send_service_event(service_id: String, event_json: String) -> Result<(), String> {
+    cached_runtime()
+        .send_event(&service_id, &event_json)
+        .map_err(|e| e.to_string())
+}
+
 /// Ensure extensions are loaded (call during app setup before building menus).
 pub fn ensure_loaded() -> &'static ExtensionsRuntime {
     cached_runtime()

@@ -27,7 +27,7 @@ Each bucket is `{config_dir}/{bucket}.json` with envelope:
 | Entry id | Bucket file | Shape |
 | --- | --- | --- |
 | `open-documents` | `documents.json` | optional `projectPath`, `openNodeIds` (string[]), optional `activeNodeId` |
-| `piano-roll-ui` | `ui.json` | `activeTool`, `snapEnabled`, `snapResolution` |
+| `piano-roll-ui` | `ui.json` | `activeTool`, `snapEnabled`, `snapResolution`, `audition` |
 | `records-ui` | `ui.json` | optional `lastNewRecordStore`, optional `explorerKindFilter` (`lab` \| `imp-graph` \| `notation` \| `all`) |
 | `window` | `window.json` | `width`, `height`, optional `x`/`y`, `maximized` |
 
@@ -48,9 +48,9 @@ Missing file, missing entry, unsupported `version`, or invalid JSON → defaults
 
 ### Piano roll UI
 
-- Global prefs (not per document): tool `draw` \| `select` \| `erase`, snap on/off, resolution `1/4` \| `1/8` \| `1/16` \| `1/32`
-- Defaults: draw, snap on, `1/16`
-- Collect on tool / snap changes; apply once at startup
+- Global prefs (not per document): tool `draw` \| `select` \| `erase`, snap on/off, resolution `1/4` \| `1/8` \| `1/16` \| `1/32`, note audition on/off
+- Defaults: draw, snap on, `1/16`, audition on (entries saved without `audition` read as on)
+- Collect on tool / snap / audition changes; apply once at startup
 
 ### Window
 

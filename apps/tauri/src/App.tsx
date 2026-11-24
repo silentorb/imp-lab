@@ -53,6 +53,7 @@ import {
   CMD_NOTATION_TOOL_DRAW,
   CMD_NOTATION_TOOL_ERASE,
   CMD_NOTATION_TOOL_SELECT,
+  CMD_PLAY_START,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
   type EditorCommandPayload,
@@ -112,6 +113,7 @@ import { LabGraphPanel } from "./LabGraphPanel";
 import {
   canRedoNotation,
   canUndoNotation,
+  createAuditionController,
   createNotationHistory,
   emptyNotation,
   isNotationDirty,
@@ -221,6 +223,7 @@ const DEFAULT_PIANO_PREFS: PianoRollUiPrefs = {
   tool: "draw",
   snapEnabled: true,
   snapResolution: "1/16",
+  audition: true,
 };
 
 /** Build tab + history state for a host-opened document DTO. */
@@ -301,6 +304,19 @@ export default function App() {
   );
   const extensionCommandIdsRef = useRef(extensionCommandIds);
   extensionCommandIdsRef.current = extensionCommandIds;
+  /** Live note audition through the playback service, when an extension pack provides it. */
+  const auditionController = useMemo(
+    () =>
+      createAuditionController((command, args) => invoke(command, args)),
+    [],
+  );
+  const audition = extensionCommandIds.has(CMD_PLAY_START)
+    ? auditionController
+    : null;
+  // Switching tabs releases anything still sounding.
+  useEffect(() => {
+    auditionController.allOff();
+  }, [activeId, auditionController]);
   const [inputBindings, setInputBindings] = useState<BindingDto[]>([]);
   const inputBindingsRef = useRef(inputBindings);
   inputBindingsRef.current = inputBindings;
@@ -1813,6 +1829,7 @@ export default function App() {
                             : (playheads[doc.id] ?? 0)
                         }
                         prefs={pianoPrefs}
+                        audition={audition}
                         onPrefsChange={setPianoPrefs}
                         onNotationChange={(notation, coalesceKey) =>
                           updateDocNotation(doc.id, notation, coalesceKey)

@@ -49,6 +49,17 @@ pub struct ImpLabServiceV0 {
     pub is_playing: Option<unsafe extern "C" fn(ctx: *mut c_void) -> c_int>,
     /// Current playback position in seconds (0 when idle). Optional; older services may omit.
     pub position_secs: Option<unsafe extern "C" fn(ctx: *mut c_void) -> f64>,
+    /// Deliver a service-defined event (UTF-8 JSON the host does not interpret), such as a
+    /// playback service's live note on / off. Returns 0 on success. Optional.
+    pub event: Option<
+        unsafe extern "C" fn(
+            ctx: *mut c_void,
+            json: *const c_uchar,
+            len: usize,
+            err_out: *mut c_char,
+            err_len: usize,
+        ) -> c_int,
+    >,
 }
 
 // Safety: service vtables are process-lifetime function pointers + opaque ctx owned by the extension.
@@ -359,6 +370,32 @@ pub unsafe fn service_position_secs(vtable: &ImpLabServiceV0) -> Result<f64, Com
     Ok(position_secs(vtable.ctx))
 }
 
+/// Deliver a service-defined JSON event to a service that publishes `event`.
+///
+/// # Safety
+///
+/// `vtable` and its `ctx` must remain valid for the duration of the call.
+pub unsafe fn send_service_event(
+    vtable: &ImpLabServiceV0,
+    json: &str,
+) -> Result<(), CommandDispatchError> {
+    let Some(event) = vtable.event else {
+        return Err(CommandDispatchError::UnsupportedAction("event".into()));
+    };
+    let mut err_buf = vec![0u8; 1024];
+    let code = event(
+        vtable.ctx,
+        json.as_ptr(),
+        json.len(),
+        err_buf.as_mut_ptr() as *mut c_char,
+        err_buf.len(),
+    );
+    if code != 0 {
+        return Err(CommandDispatchError::ServiceFailed(read_err(&err_buf, code)));
+    }
+    Ok(())
+}
+
 fn read_err(buf: &[u8], code: c_int) -> String {
     let nul = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
     if nul == 0 {
@@ -475,6 +512,51 @@ mod tests {
         assert_eq!(items[0].order, 10);
         assert_eq!(items[1].command_id, "play.stop");
         assert_eq!(items[1].order, 20);
+    }
+
+    unsafe extern "C" fn echo_event(
+        _ctx: *mut c_void,
+        json: *const c_uchar,
+        len: usize,
+        err_out: *mut c_char,
+        err_len: usize,
+    ) -> c_int {
+        let text = std::str::from_utf8(std::slice::from_raw_parts(json, len)).unwrap();
+        if text == "ok" {
+            return 0;
+        }
+        write_service_error(err_out, err_len, &format!("rejected {text}"));
+        -1
+    }
+
+    fn vtable_with_event(event: bool) -> ImpLabServiceV0 {
+        type EventFn =
+            unsafe extern "C" fn(*mut c_void, *const c_uchar, usize, *mut c_char, usize) -> c_int;
+        ImpLabServiceV0 {
+            ctx: std::ptr::null_mut(),
+            start: None,
+            stop: None,
+            toggle: None,
+            is_playing: None,
+            position_secs: None,
+            event: event.then_some(echo_event as EventFn),
+        }
+    }
+
+    #[test]
+    fn events_reach_the_service_and_report_its_errors() {
+        let vtable = vtable_with_event(true);
+        unsafe {
+            assert_eq!(send_service_event(&vtable, "ok"), Ok(()));
+            assert_eq!(
+                send_service_event(&vtable, "nope"),
+                Err(CommandDispatchError::ServiceFailed("rejected nope".into()))
+            );
+            assert_eq!(
+                send_service_event(&vtable_with_event(false), "ok"),
+                Err(CommandDispatchError::UnsupportedAction("event".into()))
+            );
+        }
     }
 
     #[test]

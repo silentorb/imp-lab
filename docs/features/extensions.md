@@ -148,6 +148,8 @@ Adds a native menu entry. `implementationId` is the command id to emit. Params:
 
 Long-lived host backend. The extension cdylib registers an `ImpLabServiceV0` vtable during `imp_lab_extension_register` under `implementationId` (e.g. `playback`). The host retains the service for the process lifetime and invokes it when extension commands run.
 
+Besides the command actions (`start`, `stop`, `toggle`, `is_playing`, `position_secs`), a service may publish `event`: a UTF-8 JSON message the host passes through **without interpreting it**. Lab sends events with the `send_service_event` Tauri command (`serviceId`, `eventJson`); a missing `event` entry reports an unsupported action. The piano roll uses this for **note audition**: while a note is placed, pressed, or dragged it sends `{"type":"note_on","id","semitone","velocity"}`, retriggers on a pitch change, and sends `{"type":"note_off","id"}` on pointer up (`{"type":"all_notes_off"}` on tab switch) to the `playback` service. How the note sounds is the service's business; the Aura pack renders it in its streaming mode. Audition is offered when the pack's play commands are present and goes quiet after the first failed send (for example, no audio device).
+
 ## Loading (host)
 
 1. Resolve and parse `extensions.json` (optional) during app setup (before building menus).

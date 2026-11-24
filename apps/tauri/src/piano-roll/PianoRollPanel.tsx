@@ -8,6 +8,7 @@ import {
   Select,
   Text,
 } from "@mantine/core";
+import type { AuditionController } from "./audition";
 import { applyNotationEdit } from "./edits";
 import {
   isBlackKey,
@@ -35,12 +36,16 @@ export type PianoRollUiPrefs = {
   tool: NotationTool;
   snapEnabled: boolean;
   snapResolution: SnapResolution;
+  /** Sound notes while they are placed, pressed, or dragged. */
+  audition: boolean;
 };
 
 export type PianoRollPanelProps = {
   notation: Notation;
   playheadBeats: number;
   prefs: PianoRollUiPrefs;
+  /** Live note audition; `null` when no playback service is loaded. */
+  audition: AuditionController | null;
   onPrefsChange: (prefs: PianoRollUiPrefs) => void;
   onNotationChange: (notation: Notation, coalesceKey?: string) => void;
   onPlayheadChange: (beats: number) => void;
@@ -130,6 +135,7 @@ export function PianoRollPanel({
   notation,
   playheadBeats,
   prefs,
+  audition,
   onPrefsChange,
   onNotationChange,
   onPlayheadChange,
@@ -150,6 +156,40 @@ export function PianoRollPanel({
   offsetRef.current = { x: offsetX, y: offsetY, scale };
   const selectedRef = useRef(selectedNote);
   selectedRef.current = selectedNote;
+  const auditionRef = useRef(audition);
+  auditionRef.current = audition;
+  /** The auditioned note held by the current gesture (released on pointer up). */
+  const heldNoteRef = useRef<number | null>(null);
+
+  const startAudition = (semitone: number, velocity: number) => {
+    const live = auditionRef.current;
+    if (!live || !prefsRef.current.audition) {
+      return;
+    }
+    live.noteOff(heldNoteRef.current);
+    heldNoteRef.current = live.noteOn(semitone, velocity);
+  };
+
+  const retriggerAudition = (semitone: number, velocity: number) => {
+    const live = auditionRef.current;
+    if (live && heldNoteRef.current != null) {
+      heldNoteRef.current = live.retrigger(heldNoteRef.current, semitone, velocity);
+    }
+  };
+
+  const stopAudition = () => {
+    auditionRef.current?.noteOff(heldNoteRef.current);
+    heldNoteRef.current = null;
+  };
+
+  // Release a held audition if the panel goes away mid-gesture.
+  useEffect(
+    () => () => {
+      auditionRef.current?.noteOff(heldNoteRef.current);
+      heldNoteRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -382,6 +422,8 @@ export function PianoRollPanel({
       if (next !== current) {
         onNotationChange(next);
         setSelectedNote(next.events.length - 1);
+        // Sounds while the button is held; released on pointer up.
+        startAudition(pitch, next.events[next.events.length - 1]?.velocity ?? 1);
       }
       return;
     }
@@ -427,6 +469,7 @@ export function PianoRollPanel({
         grabBeats,
         grabPitch: yToPitch(y, oy, sc),
       };
+      startAudition(note.semitone, note.velocity);
     }
   };
 
@@ -471,6 +514,11 @@ export function PianoRollPanel({
       if (next !== current) {
         onNotationChange(next, `move:${drag.noteIndex}`);
       }
+      // Moving in time keeps the voice; a new pitch retriggers it.
+      retriggerAudition(
+        Math.round(pitch),
+        current.events[drag.noteIndex]?.velocity ?? 1,
+      );
       return;
     }
 
@@ -507,6 +555,7 @@ export function PianoRollPanel({
       canvas.releasePointerCapture(event.pointerId);
     }
     dragRef.current = null;
+    stopAudition();
   };
 
   const onWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
@@ -552,6 +601,23 @@ export function PianoRollPanel({
               onPrefsChange({
                 ...prefs,
                 snapEnabled: event.currentTarget.checked,
+              })
+            }
+          />
+          <Checkbox
+            size="xs"
+            label="Audition"
+            title={
+              audition
+                ? "Sound notes while placing, pressing, or dragging them"
+                : "Audition needs a playback extension pack"
+            }
+            disabled={!audition}
+            checked={prefs.audition}
+            onChange={(event) =>
+              onPrefsChange({
+                ...prefs,
+                audition: event.currentTarget.checked,
               })
             }
           />

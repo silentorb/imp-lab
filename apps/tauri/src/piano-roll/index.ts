@@ -1,5 +1,10 @@
 export { PianoRollPanel, type PianoRollPanelProps, type PianoRollUiPrefs } from "./PianoRollPanel";
 export {
+  AUDITION_SERVICE_ID,
+  createAuditionController,
+  type AuditionController,
+} from "./audition";
+export {
   applyNotationEdit,
   type NotationEdit,
 } from "./edits";

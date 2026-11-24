@@ -98,6 +98,7 @@ pub fn run() {
             extensions::load_extensions_file,
             extensions::run_extension_command,
             extensions::get_playback_status,
+            extensions::send_service_event,
             user_state::get_user_state_entry,
             user_state::set_user_state_entry,
             user_state::flush_user_state
