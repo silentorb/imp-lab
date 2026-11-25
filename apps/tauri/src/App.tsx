@@ -20,7 +20,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Graph, Port, PrimitiveValue } from "imp-core-types";
 import {
   formatLiteralValue,
-  isLiteralEditableSignalType,
+  isLiteralEditableType,
   literalEditorKind,
   parseLiteralText,
   setNodeInputLiteral,
@@ -777,7 +777,7 @@ export default function App() {
     }
     return Object.values(selectedDefinition.inputs).filter(
       (port) =>
-        port.variadic !== true && isLiteralEditableSignalType(port.type),
+        port.variadic !== true && isLiteralEditableType(port.type),
     );
   }, [selectedDefinition]);
 

@@ -30,7 +30,7 @@ export function resolvePorts(
       inputs: Object.values(definition.inputs).map((port) => ({
         id: port.id,
         variadic: port.variadic === true,
-        signalType: port.type,
+        type: port.type,
         defaultValue: port.defaultValue,
       })),
       outputs: Object.values(definition.outputs).map((port) => ({
