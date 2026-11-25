@@ -2,7 +2,7 @@
 
 ## Summary
 
-Imp Lab maps user keyboard input to **commands** through a configurable bindings layer (ported from the deprecated Iced Aura Editor schema). Native menus **derive accelerators** from the same table so the OS can show the right-aligned shortcut column (VS Code–style menubar + keybinding ownership).
+Imp Lab maps user keyboard input to **commands** through a configurable bindings layer. Native menus **derive accelerators** from the same table so the OS can show the right-aligned shortcut column (VS Code–style menubar + keybinding ownership).
 
 ## Ownership (VS Code–aligned)
 
@@ -15,17 +15,17 @@ Menus are a view/delivery surface over the bindings table—not a second competi
 
 ## Persistence
 
-- Load chain: optional **user** `bindings.json` **or** bundled default **or** empty (**replace, not merge**).
+- Load chain: optional **user** `bindings.json` **or** defaults (bundled file plus extension `binding` components) **or** empty (**replace, not merge**).
 - User path: platform config dir for project `com` / `Silent Orb` / `imp-lab` → `bindings.json` (via `directories`).
 - Bundled file: `apps/tauri/src-tauri/assets/default-bindings.json`.
-- Unknown command ids (not in builtin host ids ∪ loaded extension `command` ids) are skipped.
+- Unknown command ids are skipped. Known: builtin host ids, extension `command` ids, one `document.new:<component id>` per `node-type-editor`, and every command an extension `binding` names (extension editors handle those; see [extensions](extensions.md#binding)).
 - Unsupported `version` ≠ 1 fails that file; the load chain continues.
 - No bindings settings UI; users may hand-edit the JSON. Writing the file from the app is out of scope.
 - The same config dir also holds [UI-state buckets](user-state.md) (`documents.json`, `ui.json`, `window.json`); those are a separate concern and do not merge with bindings.
 
 ## Schema (version 1)
 
-Same shape as the Iced Aura Editor design:
+Bindings file shape:
 
 ```json
 {
@@ -51,14 +51,13 @@ Same shape as the Iced Aura Editor design:
 | Ctrl/Cmd+O | `project.open` |
 | Ctrl/Cmd+P | `records.focus-filter` (Record Explorer filter) |
 | Ctrl/Cmd+W | `document.close_active` |
-| Ctrl/Cmd+N | `document.new.notation` |
+| Ctrl/Cmd+N | `document.new.graph` |
 | Ctrl/Cmd+S | `document.save` |
 | Ctrl/Cmd+Z | `edit.undo` |
 | Ctrl/Cmd+Shift+Z | `edit.redo` |
-| D / S / E / N | notation tool draw / select / erase / snap toggle |
-| Space | `play.toggle` (only when the Aura playback pack contributes that command) |
-| R | `notation.record.toggle` (start / stop a take; shown when a capture service is present) |
 | Ctrl/Cmd+, | `settings.open` (Edit → Settings…) |
+
+Packs add their own defaults with `binding` components (a playback pack binding Space to its `play.toggle`, an editor binding tool keys). Commands go to the active document's extension editor first.
 
 ## Runtime
 

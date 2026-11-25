@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { Node as ImpNode } from "imp-core-types";
-import type { DocumentKind, DocumentSummaryDto, RecordRef } from "./documents";
+import type { RecordDocumentDto, RecordRef } from "./documents";
 
 /** Host event fired after local writes and external file edits. */
 export const RECORDS_CHANGED_EVENT = "records://changed";
@@ -24,31 +24,33 @@ export type ProjectInfo = {
   stores: StoreInfo[];
 };
 
-export type RecordKind = DocumentKind | "other";
-
 export type RecordSummary = {
   nodeId: string;
   title: string;
-  kind: RecordKind;
+  /** Node type Lab opens it as; `null` for nodes Lab lists but cannot open. */
+  nodeType: string | null;
   corpusId: string | null;
   modifiedAt: string | null;
 };
 
-/** `lab` = graphs and notations; `all` also lists other Tome nodes (read-only). */
-export type ExplorerKindFilter = "lab" | DocumentKind | "all";
+/** Explorer filter: every node type Lab can open. */
+export const FILTER_OPENABLE = "openable";
+/** Explorer filter: every Tome node (others are listed, not openable). */
+export const FILTER_ALL = "all";
+
+/** A node type id, {@link FILTER_OPENABLE} or {@link FILTER_ALL}. */
+export type ExplorerTypeFilter = string;
 
 export type RecordsFilter = {
-  kind?: ExplorerKindFilter;
+  nodeType?: ExplorerTypeFilter;
   corpusId?: string | null;
   text?: string | null;
 };
 
 export type RecordPayload = {
-  kind: DocumentKind;
-  graph?: unknown;
-  notation?: unknown;
+  nodeType: string;
+  value: unknown;
 };
-
 export type SaveResult = { record: RecordRef; title: string };
 
 export type RecordsChangedEvent = {
@@ -84,7 +86,7 @@ export const projectRemoveStore = (id: string) =>
 export const recordsList = (filter: RecordsFilter) =>
   invoke<RecordSummary[]>("records_list", { filter });
 export const recordOpen = (nodeId: string) =>
-  invoke<DocumentSummaryDto>("record_open", { nodeId });
+  invoke<RecordDocumentDto>("record_open", { nodeId });
 export const recordCreate = (title: string, corpusId: string, payload: RecordPayload) =>
   invoke<SaveResult>("record_create", { title, corpusId, payload });
 export const recordSave = (nodeId: string, payload: RecordPayload) =>
@@ -92,7 +94,7 @@ export const recordSave = (nodeId: string, payload: RecordPayload) =>
 
 /**
  * Imp nodes a graph references but does not hold, resolved from the project's Tome stores.
- * `nodeTypes` are the registered node type ids (a notation record's type is its type hub).
+ * `nodeTypes` are the registered node type ids (a record is a node when its type hub is one).
  */
 export const resolveRecordNodes = (ids: string[], nodeTypes: string[]) =>
   invoke<ImpNode[]>("records_resolve_nodes", { ids, nodeTypes });

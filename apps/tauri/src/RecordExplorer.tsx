@@ -17,20 +17,24 @@ import {
   Tooltip,
   UnstyledButton,
 } from "@mantine/core";
-import type { DocumentKind } from "./documents";
-import type {
-  ExplorerKindFilter,
-  ProjectInfo,
-  RecordSummary,
-  StoreInfo,
+import type { NodeTypeInfo } from "./documents";
+import {
+  FILTER_ALL,
+  FILTER_OPENABLE,
+  type ExplorerTypeFilter,
+  type ProjectInfo,
+  type RecordSummary,
+  type StoreInfo,
 } from "./records";
 import classes from "./RecordExplorer.module.css";
 
 export type RecordExplorerProps = {
   project: ProjectInfo | null;
   records: RecordSummary[];
-  kindFilter: ExplorerKindFilter;
-  onKindFilterChange: (kind: ExplorerKindFilter) => void;
+  /** Node types Lab can open (Imp graphs first, then extension editors). */
+  nodeTypes: NodeTypeInfo[];
+  typeFilter: ExplorerTypeFilter;
+  onTypeFilterChange: (filter: ExplorerTypeFilter) => void;
   text: string;
   onTextChange: (text: string) => void;
   filterRef: RefObject<HTMLInputElement | null>;
@@ -38,7 +42,7 @@ export type RecordExplorerProps = {
   openNodeIds: Set<string>;
   activeNodeId: string | null;
   onOpen: (record: RecordSummary) => void;
-  onNewInStore: (storeId: string, kind: DocumentKind) => void;
+  onNewInStore: (storeId: string, nodeType: string) => void;
   onRename: (nodeId: string, title: string) => void;
   onArchive: (nodeId: string) => void;
   onDuplicate: (record: RecordSummary) => void;
@@ -47,20 +51,16 @@ export type RecordExplorerProps = {
   onManageStores: () => void;
 };
 
-const KIND_LABEL: Record<string, string> = {
-  "imp-graph": "graph",
-  notation: "notation",
-  other: "node",
-};
-
 function StoreHeader({
   store,
   count,
+  nodeTypes,
   onNew,
 }: {
   store: StoreInfo;
   count: number;
-  onNew: (kind: DocumentKind) => void;
+  nodeTypes: NodeTypeInfo[];
+  onNew: (nodeType: string) => void;
 }) {
   const readonly = store.access === "readonly";
   return (
@@ -97,8 +97,11 @@ function StoreHeader({
           </Menu.Target>
           <Menu.Dropdown>
             <Menu.Label>New in {store.label}</Menu.Label>
-            <Menu.Item onClick={() => onNew("imp-graph")}>Graph</Menu.Item>
-            <Menu.Item onClick={() => onNew("notation")}>Notation</Menu.Item>
+            {nodeTypes.map((t) => (
+              <Menu.Item key={t.id} onClick={() => onNew(t.id)}>
+                {t.label}
+              </Menu.Item>
+            ))}
           </Menu.Dropdown>
         </Menu>
       )}
@@ -107,7 +110,9 @@ function StoreHeader({
 }
 
 export function RecordExplorer(props: RecordExplorerProps) {
-  const { project, records, kindFilter, text } = props;
+  const { project, records, nodeTypes, typeFilter, text } = props;
+  const typeLabel = (id: string | null) =>
+    (id && nodeTypes.find((t) => t.id === id)?.label.toLowerCase()) || "node";
   const [renaming, setRenaming] = useState<RecordSummary | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [archiving, setArchiving] = useState<RecordSummary | null>(null);
@@ -132,7 +137,7 @@ export function RecordExplorer(props: RecordExplorerProps) {
           No project open
         </Text>
         <Text size="xs" c="dimmed">
-          A project is a set of data stores. Graphs and notations are saved as records in
+          A project is a set of data stores. Graphs and other documents are saved as records in
           them.
         </Text>
         <Button size="xs" onClick={props.onNewProject}>
@@ -185,13 +190,12 @@ export function RecordExplorer(props: RecordExplorerProps) {
       <SegmentedControl
         size="xs"
         fullWidth
-        value={kindFilter}
-        onChange={(value) => props.onKindFilterChange(value as ExplorerKindFilter)}
+        value={typeFilter}
+        onChange={(value) => props.onTypeFilterChange(value)}
         data={[
-          { label: "Lab", value: "lab" },
-          { label: "Graphs", value: "imp-graph" },
-          { label: "Notes", value: "notation" },
-          { label: "All", value: "all" },
+          { label: "Lab", value: FILTER_OPENABLE },
+          ...nodeTypes.map((t) => ({ label: t.title, value: t.id })),
+          { label: "All", value: FILTER_ALL },
         ]}
       />
       <ScrollArea className={classes.scroll} type="auto" offsetScrollbars>
@@ -204,7 +208,8 @@ export function RecordExplorer(props: RecordExplorerProps) {
                   <StoreHeader
                     store={store}
                     count={items.length}
-                    onNew={(kind) => props.onNewInStore(store.id, kind)}
+                    nodeTypes={nodeTypes}
+                    onNew={(nodeType) => props.onNewInStore(store.id, nodeType)}
                   />
                 ) : (
                   <Text size="xs" fw={600} c="dimmed">
@@ -217,7 +222,7 @@ export function RecordExplorer(props: RecordExplorerProps) {
                   </Text>
                 ) : (
                   items.map((record) => {
-                    const openable = record.kind !== "other";
+                    const openable = record.nodeType !== null;
                     const isActive = props.activeNodeId === record.nodeId;
                     const isOpen = props.openNodeIds.has(record.nodeId);
                     return (
@@ -235,14 +240,14 @@ export function RecordExplorer(props: RecordExplorerProps) {
                           className={classes.rowButton}
                           disabled={!openable}
                           onClick={() => openable && props.onOpen(record)}
-                          title={openable ? record.title : "Not an Imp graph or notation"}
+                          title={openable ? record.title : "No editor for this node's type"}
                         >
                           <Group gap={6} wrap="nowrap">
                             <Text size="xs" lineClamp={1} fw={isOpen ? 600 : 400}>
                               {record.title}
                             </Text>
                             <Text size="10px" c="dimmed">
-                              {KIND_LABEL[record.kind] ?? record.kind}
+                              {typeLabel(record.nodeType)}
                             </Text>
                           </Group>
                         </UnstyledButton>

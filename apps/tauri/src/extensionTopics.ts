@@ -3,7 +3,7 @@
  *
  * Extensions push changes; the host forwards each one as an `extension://topic` event. Lab does
  * not interpret topic values; the components that display a topic (a status item, a setting's
- * options, the piano-roll take) know its shape.
+ * options, an editor's live state) know its shape.
  */
 
 import { useCallback, useSyncExternalStore } from "react";

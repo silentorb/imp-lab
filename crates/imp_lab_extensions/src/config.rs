@@ -33,9 +33,10 @@ pub struct ExtensionConfig {
     /// Pack-relative path to the host Rust cdylib (`.dll` / `.so` / `.dylib`).
     #[serde(default)]
     pub library_path: Option<String>,
-    /// Optional TypeScript client module id/path (reserved for UI kinds).
+    /// Pack-relative path to the extension's webview UI library (one ES module exporting
+    /// `implementations`), for UI component kinds such as `node-type-editor`.
     #[serde(default)]
-    pub client_module: Option<String>,
+    pub ui_library_path: Option<String>,
     /// Extension-level params merged under component params.
     #[serde(default)]
     pub params: BTreeMap<String, Value>,
@@ -74,7 +75,7 @@ pub struct ComponentConfig {
 pub enum ComponentKind {
     /// Imp node / constraint / graph library catalogs.
     ImpCatalog,
-    /// Host command id (Aura Iced-style: `play.start`).
+    /// Host command id (`implementationId`, e.g. `play.start`) dispatched to a service.
     Command,
     /// Native menu entry that emits a command id (`implementationId`).
     MenuItem,
@@ -95,6 +96,11 @@ pub enum ComponentKind {
     /// A button in Properties for nodes of a type that sends a service request
     /// (`params.nodeType`, `params.serviceId`, `params.action`, optional `params.editsTopic`).
     NodeAction,
+    /// An editor for records of one Tome node type, implemented in the extension's UI library
+    /// (`params.nodeTypeId`, `params.column`; see [`crate::editors`]).
+    NodeTypeEditor,
+    /// A default key binding (`params.command`, `params.key`, optional `params.modifiers`).
+    Binding,
 }
 
 impl ComponentKind {
@@ -111,6 +117,8 @@ impl ComponentKind {
             Self::StatusItem => "status-item",
             Self::NodeLiteralOptions => "node-literal-options",
             Self::NodeAction => "node-action",
+            Self::NodeTypeEditor => "node-type-editor",
+            Self::Binding => "binding",
         }
     }
 }
@@ -173,8 +181,7 @@ mod tests {
               "id": "aura-imp-catalogs",
               "enabled": true,
               "libraryPath": "extensions/aura_imp_catalogs.so",
-              "clientModule": null,
-              "params": {}
+                            "params": {}
             }
           ],
           "components": [

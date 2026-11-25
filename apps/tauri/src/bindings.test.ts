@@ -21,7 +21,7 @@ const sample: BindingDto[] = [
     modifiers: ["ctrl"],
   },
   {
-    command: "notation.tool.select",
+    command: "sketch.tool.select",
     key: "s",
     modifiers: [],
   },
@@ -52,7 +52,7 @@ describe("resolveKeyEvent", () => {
 
   test("matches bare letter without modifiers", () => {
     expect(resolveKeyEvent(keyEvent("s"), sample)).toBe(
-      "notation.tool.select",
+      "sketch.tool.select",
     );
   });
 

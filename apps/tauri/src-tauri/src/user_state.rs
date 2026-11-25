@@ -1,6 +1,6 @@
 //! Persisted UI chrome (JSON buckets under the OS app config dir).
 //!
-//! This is editor UI state (tabs, piano prefs, window geometry) — not a general
+//! This is editor UI state (tabs, explorer prefs, extension component prefs, window geometry) — not a general
 //! settings or configuration framework.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -26,7 +26,9 @@ pub const DEBOUNCE: Duration = Duration::from_millis(500);
 
 /// Entry id → bucket file stem.
 pub const ENTRY_OPEN_DOCUMENTS: &str = "open-documents";
-pub const ENTRY_PIANO_ROLL_UI: &str = "piano-roll-ui";
+/// Prefix of a UI component's own entry (`component:<componentId>`, e.g. an editor's tool
+/// prefs). The value is opaque to Lab.
+pub const ENTRY_COMPONENT_PREFIX: &str = "component:";
 pub const ENTRY_RECORDS_UI: &str = "records-ui";
 pub const ENTRY_WINDOW: &str = "window";
 /// Extension setting values (`{settingId: value}`, opaque to Lab).
@@ -211,7 +213,12 @@ impl UserStateStore {
     pub fn bucket_for_entry(entry_id: &str) -> Option<&'static str> {
         match entry_id {
             ENTRY_OPEN_DOCUMENTS => Some(BUCKET_DOCUMENTS),
-            ENTRY_PIANO_ROLL_UI | ENTRY_RECORDS_UI => Some(BUCKET_UI),
+            ENTRY_RECORDS_UI => Some(BUCKET_UI),
+            id if id.len() > ENTRY_COMPONENT_PREFIX.len()
+                && id.starts_with(ENTRY_COMPONENT_PREFIX) =>
+            {
+                Some(BUCKET_UI)
+            }
             ENTRY_WINDOW => Some(BUCKET_WINDOW),
             ENTRY_EXTENSION_SETTINGS => Some(BUCKET_SETTINGS),
             _ => None,
@@ -331,32 +338,9 @@ pub struct RecordsUiEntry {
     /// Store chosen last time a new record was saved (default save target).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_new_record_store: Option<String>,
-    /// Explorer kind filter: `lab` | `imp-graph` | `notation` | `all`.
+    /// Explorer node-type filter: a node type id, `openable` or `all`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub explorer_kind_filter: Option<String>,
-}
-
-/// Piano-roll tool / snap prefs (`ui` bucket / `piano-roll-ui` entry).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[cfg_attr(not(test), allow(dead_code))]
-pub struct PianoRollUiEntry {
-    /// Active tool: `draw` | `select` | `erase`.
-    pub active_tool: String,
-    /// Whether snap-to-grid is enabled.
-    pub snap_enabled: bool,
-    /// Snap resolution: `1/4` | `1/8` | `1/16` | `1/32`.
-    pub snap_resolution: String,
-}
-
-impl Default for PianoRollUiEntry {
-    fn default() -> Self {
-        Self {
-            active_tool: "draw".into(),
-            snap_enabled: true,
-            snap_resolution: "1/16".into(),
-        }
-    }
+    pub explorer_node_type: Option<String>,
 }
 
 /// Main window geometry (`window` bucket / `window` entry).
@@ -704,7 +688,7 @@ mod tests {
         let mut store = UserStateStore::in_memory();
         let entry = RecordsUiEntry {
             last_new_record_store: Some("main".into()),
-            explorer_kind_filter: Some("lab".into()),
+            explorer_node_type: Some("openable".into()),
         };
         store
             .set_entry(BUCKET_UI, ENTRY_RECORDS_UI, &entry)
@@ -736,14 +720,13 @@ mod tests {
     }
 
     #[test]
-    fn piano_and_window_round_trip() {
+    fn component_entry_and_window_round_trip() {
         let dir = temp_user_dir("prefs");
         let mut store = UserStateStore::open(dir.clone());
-        let piano = PianoRollUiEntry {
-            active_tool: "select".into(),
-            snap_enabled: false,
-            snap_resolution: "1/8".into(),
-        };
+        let component = "component:sketch-editor";
+        assert_eq!(UserStateStore::bucket_for_entry(component), Some(BUCKET_UI));
+        assert_eq!(UserStateStore::bucket_for_entry(ENTRY_COMPONENT_PREFIX), None);
+        let prefs = serde_json::json!({ "tool": "select", "snap": false });
         let window = WindowEntry {
             width: 1280,
             height: 800,
@@ -752,7 +735,7 @@ mod tests {
             maximized: false,
         };
         store
-            .set_entry(BUCKET_UI, ENTRY_PIANO_ROLL_UI, &piano)
+            .set_entry(BUCKET_UI, component, &prefs)
             .unwrap();
         store
             .set_entry(BUCKET_WINDOW, ENTRY_WINDOW, &window)
@@ -761,10 +744,9 @@ mod tests {
 
         let mut reloaded = UserStateStore::open(dir.clone());
         reloaded.load_known();
-        let loaded_piano: PianoRollUiEntry =
-            reloaded.get_entry(BUCKET_UI, ENTRY_PIANO_ROLL_UI).unwrap();
+        let loaded_prefs: serde_json::Value = reloaded.get_entry(BUCKET_UI, component).unwrap();
         let loaded_window: WindowEntry = reloaded.get_entry(BUCKET_WINDOW, ENTRY_WINDOW).unwrap();
-        assert_eq!(loaded_piano, piano);
+        assert_eq!(loaded_prefs, prefs);
         assert_eq!(loaded_window, window);
         let _ = fs::remove_dir_all(dir.path());
     }

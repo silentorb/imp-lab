@@ -1,9 +1,12 @@
 //! Load optional Lab extensions and expose catalogs / commands to the React host.
 
 use imp_lab_extensions::{
-    load_extensions_default, load_extensions_from_path, node_ui, settings_layout, status_items,
-    topic_hub, ExtensionsLoadResult, ExtensionsRuntime, NodeUi, SettingsLayout, StatusItemDecl,
+    binding_decls, load_extensions_default, load_extensions_from_path, node_type_editors, node_ui,
+    settings_layout, status_items, topic_hub, BindingDecl, ExtensionsLoadResult,
+    ExtensionsRuntime, NodeTypeEditorDecl, NodeUi, SettingsLayout, StatusItemDecl,
 };
+
+use crate::lab_model::{self, NodeType};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -141,4 +144,129 @@ pub fn install_topic_sink<R: Runtime>(app: AppHandle<R>) {
             eprintln!("failed to emit {TOPIC_EVENT}: {err}");
         }
     });
+}
+
+/// Command id that opens a new, unsaved record in the editor component `editor_id`.
+pub fn new_record_command(editor_id: &str) -> String {
+    format!("document.new:{editor_id}")
+}
+
+/// Enabled `node-type-editor` components (warnings go to stderr once per call site).
+pub fn editors() -> Vec<NodeTypeEditorDecl> {
+    cached_runtime()
+        .config
+        .as_ref()
+        .map(|c| node_type_editors(c).0)
+        .unwrap_or_default()
+}
+
+/// Enabled `binding` components.
+pub fn bindings() -> Vec<BindingDecl> {
+    cached_runtime()
+        .config
+        .as_ref()
+        .map(|c| binding_decls(c).0)
+        .unwrap_or_default()
+}
+
+/// Node types Lab can open: Imp graphs plus every extension editor's node type.
+pub fn node_types() -> Vec<NodeType> {
+    lab_model::node_types_with(&editors())
+}
+
+/// An extension's webview UI library.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiLibraryDto {
+    pub extension_id: String,
+}
+
+/// UI components for the webview: libraries to load and the editors they implement.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UiExtensionsDto {
+    pub libraries: Vec<UiLibraryDto>,
+    pub editors: Vec<NodeTypeEditorDecl>,
+    pub warnings: Vec<String>,
+}
+
+/// Editors and the UI libraries that implement them.
+#[tauri::command]
+pub fn get_ui_extensions() -> UiExtensionsDto {
+    let Some(config) = cached_runtime().config.as_ref() else {
+        return UiExtensionsDto::default();
+    };
+    let (editors, mut warnings) = node_type_editors(config);
+    warnings.extend(binding_decls(config).1);
+    let libraries = config
+        .extensions
+        .iter()
+        .filter(|e| e.enabled && editors.iter().any(|ed| ed.extension_id == e.id))
+        .map(|e| UiLibraryDto {
+            extension_id: e.id.clone(),
+        })
+        .collect();
+    UiExtensionsDto {
+        libraries,
+        editors,
+        warnings,
+    }
+}
+
+/// Source of an extension's UI library (an ES module), read from the pack. The path must stay
+/// inside the pack root.
+#[tauri::command]
+pub fn read_ui_library(extension_id: String) -> Result<String, String> {
+    let runtime = cached_runtime();
+    let config = runtime.config.as_ref().ok_or("no_extensions: no pack loaded")?;
+    let extension = config
+        .extensions
+        .iter()
+        .find(|e| e.id == extension_id && e.enabled)
+        .ok_or_else(|| format!("not_found: extension {extension_id}"))?;
+    let relative = extension
+        .ui_library_path
+        .as_deref()
+        .ok_or_else(|| format!("no_ui_library: extension {extension_id} has no uiLibraryPath"))?;
+    let root = runtime
+        .result
+        .pack_root
+        .as_deref()
+        .map(PathBuf::from)
+        .ok_or("no_extensions: no pack root")?;
+    let path = ui_library_path(&root, relative)?;
+    std::fs::read_to_string(&path).map_err(|e| format!("io: {}: {e}", path.display()))
+}
+
+fn ui_library_path(root: &std::path::Path, relative: &str) -> Result<PathBuf, String> {
+    let root = root
+        .canonicalize()
+        .map_err(|e| format!("io: {}: {e}", root.display()))?;
+    let path = root
+        .join(relative)
+        .canonicalize()
+        .map_err(|e| format!("io: {relative}: {e}"))?;
+    if !path.starts_with(&root) {
+        return Err(format!("invalid_path: {relative} is outside the pack"));
+    }
+    Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ui_library_paths_stay_inside_the_pack() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pack = tmp.path().join("pack");
+        std::fs::create_dir_all(pack.join("extensions")).unwrap();
+        std::fs::write(pack.join("extensions/ui.js"), "export const implementations = {};").unwrap();
+        std::fs::write(tmp.path().join("secret.js"), "").unwrap();
+        assert!(ui_library_path(&pack, "extensions/ui.js").is_ok());
+        assert!(ui_library_path(&pack, "../secret.js")
+            .unwrap_err()
+            .starts_with("invalid_path"));
+        assert!(ui_library_path(&pack, "extensions/missing.js").is_err());
+    }
 }

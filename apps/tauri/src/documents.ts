@@ -1,13 +1,9 @@
-/** Document tab state for Imp Lab (Imp graphs + Aura notation stored as Tome records). */
+/** Document tab state for Imp Lab: one open Tome record (an Imp graph, or a node type an extension edits). */
 
 import type { Graph } from "imp-core-types";
-import {
-  emptyNotation,
-  summarizeNotation,
-  type Notation,
-} from "./piano-roll";
 
-export type DocumentKind = "imp-graph" | "notation";
+/** Type-table id of Imp graph records (built in). */
+export const IMP_GRAPH_NODE_TYPE = "01M80M9GRAPH00000000000001";
 
 export type DocumentProperty = { label: string; value: string };
 
@@ -23,32 +19,28 @@ export type EditorDocument = {
   /** Node id once saved; a session-local UUID before the first save. */
   id: string;
   title: string;
-  kind: DocumentKind;
+  /** Tome node type (type-table id). */
+  nodeType: string;
   /** `null` until the document is first saved to a store. */
   record: RecordRef | null;
   dirty: boolean;
-  summary: string;
-  properties: DocumentProperty[];
-  /** Bare Imp graph for `imp-graph` docs. */
+  /** Bare Imp graph for Imp graph documents. */
   graph?: Graph;
-  /** Aura notation tip for `notation` docs. */
-  notation?: Notation;
+  /** Editor value for documents of an extension node type. */
+  value?: unknown;
 };
 
 /** Host DTO from `record_open`. */
-export type DocumentSummaryDto = {
+export type RecordDocumentDto = {
   id: string;
   title: string;
-  kind: DocumentKind;
+  nodeType: string;
   record: RecordRef;
-  summary: string;
-  properties: DocumentProperty[];
-  graph?: Graph;
-  notation?: Notation;
+  value: unknown;
 };
 
-export function documentFromDto(dto: DocumentSummaryDto): EditorDocument {
-  return { ...dto, dirty: false };
+export function isImpGraph(doc: Pick<EditorDocument, "nodeType">): boolean {
+  return doc.nodeType === IMP_GRAPH_NODE_TYPE;
 }
 
 export function isUnsaved(doc: Pick<EditorDocument, "record">): boolean {
@@ -59,42 +51,39 @@ export function emptyImpGraph(): Graph {
   return { nodes: {}, edges: {} };
 }
 
-export function newUntitledDocument(
-  kind: DocumentKind = "imp-graph",
-): EditorDocument {
-  const id = crypto.randomUUID();
-  if (kind === "notation") {
-    const notation = emptyNotation(id);
-    const title = "Untitled notation";
-    return {
-      id,
-      title,
-      kind,
-      record: null,
-      dirty: true,
-      summary: summarizeNotation(notation),
-      properties: [
-        { label: "Type", value: kind },
-        { label: "Title", value: title },
-        { label: "Store", value: "Not saved yet" },
-      ],
-      notation,
-    };
-  }
+export function summarizeGraph(graph: Graph): string {
+  const nodeCount = Object.keys(graph.nodes).length;
+  const edgeCount = Object.keys(graph.edges).length;
+  return `Imp graph · ${nodeCount} nodes · ${edgeCount} edges`;
+}
 
-  const title = "Untitled graph";
+/** A new, unsaved document. */
+export function newUntitledDocument(
+  nodeType: string,
+  label: string,
+  init: { graph?: Graph; value?: unknown },
+): EditorDocument {
   return {
-    id,
-    title,
-    kind,
+    id: crypto.randomUUID(),
+    title: `Untitled ${label.toLowerCase()}`,
+    nodeType,
     record: null,
     dirty: true,
-    summary: "Untitled Imp graph · empty",
-    properties: [
-      { label: "Type", value: kind },
-      { label: "Title", value: title },
-      { label: "Store", value: "Not saved yet" },
-    ],
-    graph: emptyImpGraph(),
+    ...init,
   };
 }
+
+/** A node type Lab can open, as the explorer and search list it. */
+export type NodeTypeInfo = {
+  id: string;
+  /** One record ("Graph"). */
+  label: string;
+  /** Many records ("Graphs"). */
+  title: string;
+};
+
+export const IMP_GRAPH_TYPE_INFO: NodeTypeInfo = {
+  id: IMP_GRAPH_NODE_TYPE,
+  label: "Graph",
+  title: "Graphs",
+};

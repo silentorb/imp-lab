@@ -6,6 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+use imp_lab_extensions::BindingDecl;
+
 /// Bundled default bindings JSON.
 pub const DEFAULT_BINDINGS_JSON: &str = include_str!("../assets/default-bindings.json");
 
@@ -20,7 +22,6 @@ const MOD_LOGO: u8 = 8;
 pub const BUILTIN_COMMAND_IDS: &[&str] = &[
     "project.open",
     "document.new.graph",
-    "document.new.notation",
     "document.save",
     "document.duplicate-to-store",
     "project.new",
@@ -32,11 +33,6 @@ pub const BUILTIN_COMMAND_IDS: &[&str] = &[
     "edit.undo",
     "edit.redo",
     "view.toggle-color-scheme",
-    "notation.tool.draw",
-    "notation.tool.select",
-    "notation.tool.erase",
-    "notation.snap.toggle",
-    "notation.record.toggle",
     "settings.open",
 ];
 
@@ -138,10 +134,12 @@ impl Bindings {
         Self::default()
     }
 
-    /// Load using the production chain against `known_commands`.
-    pub fn load(known_commands: &HashSet<String>) -> Self {
+    /// Load using the production chain against `known_commands`. Extension `binding`
+    /// components join the bundled defaults; a user file replaces both.
+    pub fn load(known_commands: &HashSet<String>, extension_bindings: &[BindingDecl]) -> Self {
         let user_path = user_bindings_path();
-        Self::load_chain(user_path.as_deref(), DEFAULT_BINDINGS_JSON, known_commands)
+        let defaults = with_extension_bindings(DEFAULT_BINDINGS_JSON, extension_bindings);
+        Self::load_chain(user_path.as_deref(), &defaults, known_commands)
     }
 
     /// Load with an explicit user path (tests) and a default JSON string.
@@ -279,6 +277,25 @@ pub fn user_bindings_path() -> Option<PathBuf> {
         .map(|dirs| dirs.config_dir().join("bindings.json"))
 }
 
+/// `default_json` with `extension_bindings` appended (unchanged if it does not parse).
+pub fn with_extension_bindings(default_json: &str, extension_bindings: &[BindingDecl]) -> String {
+    if extension_bindings.is_empty() {
+        return default_json.to_string();
+    }
+    let Ok(mut file) = serde_json::from_str::<serde_json::Value>(default_json) else {
+        return default_json.to_string();
+    };
+    if let Some(list) = file.get_mut("bindings").and_then(|b| b.as_array_mut()) {
+        for binding in extension_bindings {
+            list.push(serde_json::json!({
+                "command": binding.command,
+                "when": { "type": "key", "key": binding.key, "modifiers": binding.modifiers },
+            }));
+        }
+    }
+    file.to_string()
+}
+
 /// Builtin ids plus extension-contributed command ids.
 pub fn known_command_ids(extension_command_ids: &[String]) -> HashSet<String> {
     let mut known: HashSet<String> = BUILTIN_COMMAND_IDS
@@ -291,11 +308,20 @@ pub fn known_command_ids(extension_command_ids: &[String]) -> HashSet<String> {
     known
 }
 
-/// Load once and cache for menu build + `get_input_bindings`.
+/// Load once and cache for menu build + `get_input_bindings`. Known commands are the built-in
+/// ones, extension commands, one New command per extension editor, and the commands extension
+/// `binding` components name (editors handle those in the webview).
 pub fn ensure_loaded(extension_command_ids: &[String]) -> &'static Bindings {
     BINDINGS.get_or_init(|| {
-        let known = known_command_ids(extension_command_ids);
-        Bindings::load(&known)
+        let extension_bindings = crate::extensions::bindings();
+        let mut known = known_command_ids(extension_command_ids);
+        known.extend(
+            crate::extensions::editors()
+                .iter()
+                .map(|e| crate::extensions::new_record_command(&e.id)),
+        );
+        known.extend(extension_bindings.iter().map(|b| b.command.clone()));
+        Bindings::load(&known, &extension_bindings)
     })
 }
 
@@ -477,10 +503,28 @@ mod tests {
     }
 
     #[test]
+    fn extension_bindings_join_the_defaults() {
+        let extension = [BindingDecl {
+            id: "play-space".into(),
+            command: "play.toggle".into(),
+            key: "space".into(),
+            modifiers: Vec::new(),
+        }];
+        let merged = with_extension_bindings(DEFAULT_BINDINGS_JSON, &extension);
+        let bindings = Bindings::from_json_str(&merged, &known()).unwrap();
+        assert_eq!(bindings.len(), 5);
+        assert_eq!(
+            bindings.accelerator_for_command("play.toggle").as_deref(),
+            Some("Space")
+        );
+        assert_eq!(with_extension_bindings(DEFAULT_BINDINGS_JSON, &[]), DEFAULT_BINDINGS_JSON);
+    }
+
+    #[test]
     fn parses_default_bindings() {
         let bindings = Bindings::from_json_str(DEFAULT_BINDINGS_JSON, &known()).unwrap();
         // Defaults include more commands than `known()`; only known kept.
-        assert_eq!(bindings.len(), 5);
+        assert_eq!(bindings.len(), 4);
         assert_eq!(
             bindings.accelerator_for_command("project.open").as_deref(),
             Some("CmdOrCtrl+O")
@@ -493,10 +537,7 @@ mod tests {
             bindings.accelerator_for_command("edit.redo").as_deref(),
             Some("CmdOrCtrl+Shift+Z")
         );
-        assert_eq!(
-            bindings.accelerator_for_command("play.toggle").as_deref(),
-            Some("Space")
-        );
+        assert_eq!(bindings.accelerator_for_command("play.toggle"), None);
     }
 
     #[test]
@@ -570,7 +611,7 @@ mod tests {
     fn load_chain_falls_back_to_default_when_user_missing() {
         let missing = PathBuf::from("/tmp/imp-lab-bindings-does-not-exist.json");
         let bindings = Bindings::load_chain(Some(&missing), DEFAULT_BINDINGS_JSON, &known());
-        assert_eq!(bindings.len(), 5);
+        assert_eq!(bindings.len(), 4);
     }
 
     #[test]

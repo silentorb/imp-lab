@@ -1,31 +1,20 @@
 # Imp Lab
 
-Crates for **managing scaling networks of Imp graphs**, plus editor/GUI building blocks for working with those graphs. Language-neutral Imp specs live in [imp-spec](https://github.com/silentorb/imp-spec); the Rust Imp core lives in [imp-rs](https://github.com/silentorb/imp-rs).
+Crates and a desktop app for **managing scaling networks of Imp graphs**. Language-neutral Imp specs live in [imp-spec](https://github.com/silentorb/imp-spec); the Rust Imp core lives in [imp-rs](https://github.com/silentorb/imp-rs).
 
-Product hosts supply domain chrome, registries, and extensions via Lab’s optional [extensions system](docs/features/extensions.md) (Tome-shaped `extensions.json` + sidecar cdylibs). This repo must not depend on Aura (`aura_*`) crates. The Iced Aura Editor is **deprecated**; prefer Imp Lab + an Aura Lab pack for audio catalogs.
+Imp Lab is **domain-neutral**: it knows Imp graphs and Tome records, and nothing about any product's domain (no audio, no music notation). Products add their domain through Lab's optional [extensions system](docs/features/extensions.md): a Tome-shaped `extensions.json` that wires components from extension libraries (Rust cdylibs for backends, ES-module UI libraries for webview editors). This repo must not depend on Aura (`aura_*`) crates or packages. Aura's editor UI lives in [aura-editor](https://github.com/silentorb/aura-editor) and ships to Lab as part of the Aura pack.
 
-GUI and non-GUI concerns live in the same repository for now (separate crates / apps). A further split within the repo is fine later; treating lab as “GUI only” is not the intended scope.
+## Layout
 
-## Layers
-
-| Layer | Rule |
+| Path | Role |
 | --- | --- |
-| **Backend** | No Iced. Session/network/document management and other non-UI helpers. |
-| **Frontend (Iced)** | Iced UI building blocks. May depend on backend crates directly. Used by the deprecated Aura Iced editor. |
-| **Desktop app (Tauri)** | Imp Lab under `apps/tauri/` (Tauri 2 + React + Mantine). |
-| **Shared interfaces** | Not required. Add only if frontend and backend need a dependency-light shared surface. |
-
-| Path | Layer | Role |
-| --- | --- | --- |
-| `imp_lab_extensions` | Backend | Optional Tome-shaped `extensions.json` + dynamic library loading (`imp-catalog`) |
-| `imp_graph_editor` | Frontend (Iced) | Iced Imp graph-dag building blocks (canvas, edit helpers, chrome widgets) |
-| `apps/tauri` | Desktop app | Imp Lab (`imp_lab` / `imp-lab`); Open/Save bridged; editable graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view) `ImpGraphView`; Edit Undo/Redo; configurable input bindings (menus derive accelerators); host ELK LR layout; optional catalogs via Lab pack; Simple mode deferred |
-
-The desktop app loads optional packs (e.g. Aura audio catalogs) without compile-time Aura deps.
+| `crates/imp_lab_extensions` | `extensions.json` parse, dynamic library loading, component declarations (catalogs, commands, menus, services, settings, node UI, node-type editors, bindings) |
+| `packages/imp-lab-ui` | Contract between Lab and extension UI libraries: implementation types and the modules Lab shares with them |
+| `apps/tauri` | Imp Lab (`imp_lab` / `imp-lab`, Tauri 2 + React + Mantine): projects of Tome data stores, records opened by Tome node type, editable Imp graphs via [imp-graph-view](https://github.com/silentorb/imp-graph-view), extension editors for other node types, configurable input bindings, extension settings / status items / node UI |
 
 ## Development
 
-From repo root (Iced crates):
+From repo root (library crates; default members):
 
 ```bash
 cargo test
@@ -37,6 +26,7 @@ Desktop app (Bun + WebKit; in aura-workbench use the **imp-lab** Compose service
 ```bash
 cd apps/tauri
 bun install
+bun run test
 bun run build
 # or: bun run tauri dev
 cargo check -p imp_lab

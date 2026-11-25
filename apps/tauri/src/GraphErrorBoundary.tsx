@@ -4,13 +4,15 @@ import { Button, Stack, Text } from "@mantine/core";
 type Props = {
   children: ReactNode;
   resetKey?: string;
+  /** What failed, in the message ("Graph view"). */
+  what?: string;
 };
 
 type State = {
   error: Error | null;
 };
 
-/** Keeps the Lab shell visible if the graph canvas throws (e.g. bad document). */
+/** Keeps the Lab shell visible if an editor (graph canvas, extension panel) throws. */
 export class GraphErrorBoundary extends Component<Props, State> {
   state: State = { error: null };
 
@@ -19,7 +21,7 @@ export class GraphErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error("Imp graph view crashed", error, info.componentStack);
+    console.error(`${this.props.what ?? "Graph view"} crashed`, error, info.componentStack);
   }
 
   componentDidUpdate(prevProps: Props): void {
@@ -33,7 +35,7 @@ export class GraphErrorBoundary extends Component<Props, State> {
       return (
         <Stack gap="sm" p="md" align="flex-start">
           <Text size="sm" c="red">
-            Graph view failed to render: {this.state.error.message}
+            {this.props.what ?? "Graph view"} failed to render: {this.state.error.message}
           </Text>
           <Button
             size="xs"

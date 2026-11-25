@@ -1,6 +1,7 @@
 //! Tome-shaped Imp Lab extensions: config parse + dynamically linked host modules.
 
 mod config;
+pub mod editors;
 mod host;
 mod loader;
 pub mod node_ui;
@@ -28,6 +29,7 @@ pub use service::{
     write_service_reply, CommandDispatchError, ImpLabServiceV0, MenuItemContribution,
     RegisteredService, ResolvedCommandAction, ServiceRegistry, SERVICE_REPLY_TOO_SMALL,
 };
+pub use editors::{binding_decls, node_type_editors, BindingDecl, NodeTypeEditorDecl};
 pub use node_ui::{node_ui, NodeActionDecl, NodeEdit, NodeLiteralOptionsDecl, NodeUi};
 pub use settings::{settings_layout, status_items, SettingsLayout, StatusItemDecl};
 pub use topics::{topic_hub, Publisher, PublishFn, TopicHub};

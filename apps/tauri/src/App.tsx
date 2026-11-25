@@ -40,7 +40,6 @@ import {
   CMD_DOCUMENT_CLOSE_ACTIVE,
   CMD_DOCUMENT_DUPLICATE,
   CMD_DOCUMENT_NEW_GRAPH,
-  CMD_DOCUMENT_NEW_NOTATION,
   CMD_DOCUMENT_SAVE,
   CMD_PROJECT_MANAGE_STORES,
   CMD_PROJECT_NEW,
@@ -50,15 +49,9 @@ import {
   CMD_GRAPH_ADD_NODE,
   CMD_EDIT_REDO,
   CMD_EDIT_UNDO,
-  CMD_NOTATION_RECORD_TOGGLE,
-  CMD_NOTATION_SNAP_TOGGLE,
-  CMD_PLAY_STOP,
+  CMD_PLAY_START,
   CMD_PLAY_TOGGLE,
   CMD_SETTINGS_OPEN,
-  CMD_NOTATION_TOOL_DRAW,
-  CMD_NOTATION_TOOL_ERASE,
-  CMD_NOTATION_TOOL_SELECT,
-  CMD_PLAY_START,
   CMD_VIEW_TOGGLE_COLOR_SCHEME,
   EDITOR_COMMAND_EVENT,
   type EditorCommandPayload,
@@ -75,17 +68,46 @@ import {
   type GraphHistory,
 } from "./documentHistory";
 import {
-  documentFromDto,
   emptyImpGraph,
+  IMP_GRAPH_NODE_TYPE,
+  IMP_GRAPH_TYPE_INFO,
+  isImpGraph,
   newUntitledDocument,
-  type DocumentKind,
-  type DocumentSummaryDto,
+  summarizeGraph,
+  type DocumentProperty,
   type EditorDocument,
+  type NodeTypeInfo,
+  type RecordDocumentDto,
   type RecordRef,
 } from "./documents";
 import {
+  EMPTY_UI,
+  importModuleSource,
+  installSharedModules,
+  loadUi,
+  newRecordCommand,
+  type LoadedEditor,
+  type LoadedUi,
+  type UiExtensionsDto,
+} from "./extensionUi";
+import { ExtensionEditorPanel, type CommandHandler } from "./ExtensionEditorPanel";
+import {
+  canRedoValue,
+  canUndoValue,
+  createValueHistory,
+  isValueDirty,
+  jsonEquals,
+  markValueSaved,
+  pushValue,
+  redoValue,
+  undoValue,
+  type ValueHistory,
+} from "./valueHistory";
+import {
   defaultSaveStore,
   errorMessage,
+  FILTER_ALL,
+  FILTER_OPENABLE,
   projectAddStore,
   projectCurrent,
   projectOpen,
@@ -100,7 +122,7 @@ import {
   recordRename,
   recordSave,
   recordsList,
-  type ExplorerKindFilter,
+  type ExplorerTypeFilter,
   type ProjectInfo,
   type RecordPayload,
   type RecordsChangedEvent,
@@ -116,43 +138,17 @@ import {
 } from "./StoreDialogs";
 import { GraphErrorBoundary } from "./GraphErrorBoundary";
 import { LabGraphPanel } from "./LabGraphPanel";
-import {
-  applyTake,
-  canRedoNotation,
-  canUndoNotation,
-  createAuditionController,
-  createRecordingController,
-  takeFromTopic,
-  createNotationHistory,
-  emptyNotation,
-  isNotationDirty,
-  markNotationSaved,
-  notationFromUnknown,
-  PianoRollPanel,
-  pushNotation,
-  redoNotation,
-  secondsToBeats,
-  summarizeNotation,
-  undoNotation,
-  type Notation,
-  type NotationHistory,
-  type PianoRollUiPrefs,
-} from "./piano-roll";
 import { getLabRegistry } from "./registry";
 import {
   collectOpenDocumentsEntry,
   ENTRY_OPEN_DOCUMENTS,
-  ENTRY_PIANO_ROLL_UI,
   ENTRY_RECORDS_UI,
   getUserStateEntry,
-  pianoEntryToPrefs,
-  pianoPrefsToEntry,
   setUserStateEntry,
   type OpenDocumentsEntry,
-  type PianoRollUiEntry,
   type RecordsUiEntry,
 } from "./userState";
-import { connectTopics, topicStore, useTopic } from "./extensionTopics";
+import { connectTopics, topicStore } from "./extensionTopics";
 import {
   actionsFor,
   applyNodeEdit,
@@ -198,12 +194,6 @@ type ExtensionsLoadDto = {
   };
 };
 
-function summarizeGraph(graph: Graph): string {
-  const nodeCount = Object.keys(graph.nodes).length;
-  const edgeCount = Object.keys(graph.edges).length;
-  return `Imp graph · ${nodeCount} nodes · ${edgeCount} edges`;
-}
-
 function isTextEditingTarget(el: Element | null): boolean {
   if (!el || !(el instanceof HTMLElement)) {
     return false;
@@ -219,27 +209,90 @@ function documentDirty(history: GraphHistory, record: RecordRef | null): boolean
   return isDirty(history) || record === null;
 }
 
-function notationDocDirty(
-  history: NotationHistory,
-  record: RecordRef | null,
-): boolean {
-  return isNotationDirty(history) || record === null;
+function editorEquals(editor: LoadedEditor | undefined) {
+  return editor?.implementation.equals ?? jsonEquals;
 }
 
-const EXPLORER_KINDS: ExplorerKindFilter[] = ["lab", "imp-graph", "notation", "all"];
+function valueDocDirty(
+  history: ValueHistory<unknown>,
+  record: RecordRef | null,
+  editor: LoadedEditor | undefined,
+): boolean {
+  return isValueDirty(history, editorEquals(editor)) || record === null;
+}
+
+/** Editor component for a node type (extension node types only; Imp graphs are built in). */
+function editorFor(ui: LoadedUi, nodeType: string): LoadedEditor | undefined {
+  return ui.editors.find((e) => e.nodeTypeId === nodeType);
+}
+
+/** Node types Lab can open, for the explorer and search. */
+function nodeTypeInfos(ui: LoadedUi): NodeTypeInfo[] {
+  return [
+    IMP_GRAPH_TYPE_INFO,
+    ...ui.editors.map((e) => ({ id: e.nodeTypeId, label: e.label, title: e.typeTitle })),
+  ];
+}
 
 /** Body to persist for a document. */
-function payloadFor(doc: EditorDocument): RecordPayload {
-  if (doc.kind === "notation") {
-    return { kind: "notation", notation: doc.notation ?? emptyNotation(doc.id) };
+function payloadFor(ui: LoadedUi, doc: EditorDocument): RecordPayload {
+  if (isImpGraph(doc)) {
+    return { nodeType: IMP_GRAPH_NODE_TYPE, value: doc.graph ?? emptyImpGraph() };
   }
-  return { kind: "imp-graph", graph: doc.graph ?? emptyImpGraph() };
+  const serialize = editorFor(ui, doc.nodeType)?.implementation.serialize;
+  return { nodeType: doc.nodeType, value: serialize ? serialize(doc.value) : doc.value };
 }
 
-function emptyPayload(kind: DocumentKind): RecordPayload {
-  return kind === "notation"
-    ? { kind, notation: emptyNotation(crypto.randomUUID()) }
-    : { kind, graph: emptyImpGraph() };
+/** Body of a new, empty record of `nodeType`. */
+function emptyPayload(ui: LoadedUi, nodeType: string): RecordPayload {
+  if (nodeType === IMP_GRAPH_NODE_TYPE) {
+    return { nodeType, value: emptyImpGraph() };
+  }
+  const editor = editorFor(ui, nodeType);
+  if (!editor) {
+    throw new Error(`no editor for node type ${nodeType}`);
+  }
+  const value = editor.implementation.empty();
+  const serialize = editor.implementation.serialize;
+  return { nodeType, value: serialize ? serialize(value) : value };
+}
+
+/** One-line summary under the tab title. */
+function summarizeDoc(ui: LoadedUi, doc: EditorDocument): string {
+  if (isImpGraph(doc)) {
+    return doc.record || Object.keys(doc.graph?.nodes ?? {}).length > 0
+      ? summarizeGraph(doc.graph ?? emptyImpGraph())
+      : "Untitled Imp graph · empty";
+  }
+  const editor = editorFor(ui, doc.nodeType);
+  return editor ? editor.implementation.summarize(doc.value) : doc.nodeType;
+}
+
+/** Properties pane rows for a document without a selection. */
+function docProperties(
+  ui: LoadedUi,
+  doc: EditorDocument,
+  storeLabel: string,
+): DocumentProperty[] {
+  const editor = editorFor(ui, doc.nodeType);
+  const rows: DocumentProperty[] = [
+    { label: "Type", value: isImpGraph(doc) ? "Imp graph" : (editor?.label ?? doc.nodeType) },
+    { label: "Title", value: doc.title },
+    { label: "Store", value: storeLabel },
+  ];
+  if (doc.record) {
+    rows.push({ label: "Node id", value: doc.record.nodeId });
+  }
+  if (isImpGraph(doc)) {
+    const graph = doc.graph ?? emptyImpGraph();
+    rows.push(
+      { label: "Nodes", value: String(Object.keys(graph.nodes).length) },
+      { label: "Edges", value: String(Object.keys(graph.edges).length) },
+    );
+  } else if (editor?.implementation.properties) {
+    rows.push(...editor.implementation.properties(doc.value));
+  }
+  return rows;
 }
 
 /** Pending store picker: what is being saved, plus the dialog request. */
@@ -248,46 +301,51 @@ type SaveTargetState = {
   payload: RecordPayload;
 };
 
-type PlaybackStatusDto = {
-  playing: boolean;
-  positionSecs: number;
-};
-
-const DEFAULT_PIANO_PREFS: PianoRollUiPrefs = {
-  tool: "draw",
-  snapEnabled: true,
-  snapResolution: "1/16",
-  audition: true,
-  click: true,
-};
-
-/** Build tab + history state for a host-opened document DTO. */
-function materializeOpenedDocument(dto: DocumentSummaryDto): {
+/** Build tab + history state for a host-opened record. */
+function materializeOpenedDocument(
+  ui: LoadedUi,
+  dto: RecordDocumentDto,
+): {
   doc: EditorDocument;
   graphHistory?: GraphHistory;
-  notationHistory?: NotationHistory;
-  playhead?: number;
+  valueHistory?: ValueHistory<unknown>;
 } {
-  const doc = documentFromDto(dto);
-  if (doc.kind === "notation") {
-    const parsed = notationFromUnknown(
-      doc.notation ?? emptyNotation(doc.id),
-    );
-    const opened = {
-      ...doc,
-      notation: parsed,
-      summary: summarizeNotation(parsed),
-    };
-    return {
-      doc: opened,
-      notationHistory: createNotationHistory(parsed),
-      playhead: 0,
-    };
-  }
-  return {
-    doc,
-    graphHistory: createHistory(doc.graph ?? emptyImpGraph()),
+  const base = {
+    id: dto.id,
+    title: dto.title,
+    nodeType: dto.nodeType,
+    record: dto.record,
+    dirty: false,
   };
+  if (dto.nodeType === IMP_GRAPH_NODE_TYPE) {
+    const graph = (dto.value as Graph | null) ?? emptyImpGraph();
+    return { doc: { ...base, graph }, graphHistory: createHistory(graph) };
+  }
+  const editor = editorFor(ui, dto.nodeType);
+  if (!editor) {
+    throw new Error("no editor for this record's node type");
+  }
+  const value = editor.implementation.parse(dto.value);
+  return { doc: { ...base, value }, valueHistory: createValueHistory(value) };
+}
+
+const UI_IO = {
+  getUiExtensions: () => invoke<UiExtensionsDto>("get_ui_extensions"),
+  readLibrary: (extensionId: string) => invoke<string>("read_ui_library", { extensionId }),
+  importModule: importModuleSource,
+};
+
+/** Loads extension UI once per page; every caller awaits the same load. */
+let uiLoad: Promise<LoadedUi> | null = null;
+function loadExtensionUi(): Promise<LoadedUi> {
+  if (!uiLoad) {
+    installSharedModules();
+    uiLoad = loadUi(UI_IO).catch((err: unknown) => {
+      console.warn("extension UI unavailable", err);
+      return EMPTY_UI;
+    });
+  }
+  return uiLoad;
 }
 
 export default function App() {
@@ -297,26 +355,26 @@ export default function App() {
   const [histories, setHistories] = useState<Record<string, GraphHistory>>(
     {},
   );
-  const [notationHistories, setNotationHistories] = useState<
-    Record<string, NotationHistory>
+  const [valueHistories, setValueHistories] = useState<
+    Record<string, ValueHistory<unknown>>
   >({});
-  const [playheads, setPlayheads] = useState<Record<string, number>>({});
-  const [pianoPrefs, setPianoPrefs] =
-    useState<PianoRollUiPrefs>(DEFAULT_PIANO_PREFS);
-  const [notationPlayingId, setNotationPlayingId] = useState<string | null>(
-    null,
-  );
-  const [livePlayheadBeats, setLivePlayheadBeats] = useState<number | null>(
-    null,
-  );
+  /** Extension UI: editors for node types extensions add. */
+  const [ui, setUi] = useState<LoadedUi>(EMPTY_UI);
+  const uiRef = useRef(ui);
+  uiRef.current = ui;
+  const nodeTypes = useMemo(() => nodeTypeInfos(ui), [ui]);
+  /** Document id → command handler of its extension editor panel. */
+  const commandHandlers = useRef(new Map<string, CommandHandler>());
+  const setCommandHandler = useCallback((docId: string, handler: CommandHandler | null) => {
+    if (handler) commandHandlers.current.set(docId, handler);
+    else commandHandlers.current.delete(docId);
+  }, []);
   const documentsRef = useRef(documents);
   documentsRef.current = documents;
   const historiesRef = useRef(histories);
   historiesRef.current = histories;
-  const notationHistoriesRef = useRef(notationHistories);
-  notationHistoriesRef.current = notationHistories;
-  const playheadsRef = useRef(playheads);
-  playheadsRef.current = playheads;
+  const valueHistoriesRef = useRef(valueHistories);
+  valueHistoriesRef.current = valueHistories;
   const [activeId, setActiveId] = useState("");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [titleDraft, setTitleDraft] = useState("");
@@ -326,7 +384,7 @@ export default function App() {
   const projectRef = useRef(project);
   projectRef.current = project;
   const [records, setRecords] = useState<RecordSummary[]>([]);
-  const [kindFilter, setKindFilter] = useState<ExplorerKindFilter>("lab");
+  const [typeFilter, setTypeFilter] = useState<ExplorerTypeFilter>(FILTER_OPENABLE);
   const [filterText, setFilterText] = useState("");
   const filterRef = useRef<HTMLInputElement | null>(null);
   const [recordSearchOpen, setRecordSearchOpen] = useState(false);
@@ -342,21 +400,8 @@ export default function App() {
   );
   const extensionCommandIdsRef = useRef(extensionCommandIds);
   extensionCommandIdsRef.current = extensionCommandIds;
-  /** Live note audition through the playback service, when an extension pack provides it. */
-  const auditionController = useMemo(
-    () =>
-      createAuditionController((command, args) => invoke(command, args)),
-    [],
-  );
-  const audition = extensionCommandIds.has(CMD_PLAY_START)
-    ? auditionController
-    : null;
-  // Switching tabs releases anything still sounding.
-  useEffect(() => {
-    auditionController.allOff();
-  }, [activeId, auditionController]);
 
-  // Extension topics (pushed state) feed status items, live setting options, and takes.
+  // Extension topics (pushed state) feed status items, live setting options, and editors.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -462,32 +507,6 @@ export default function App() {
     <StatusItems items={statusItemDecls} onOpenCategory={openSettings} />
   );
 
-  /** Live note capture (recording takes) through the playback service, when offered. */
-  const recordingController = useMemo(
-    () => createRecordingController((command, args) => invoke(command, args)),
-    [],
-  );
-  const [captureTopic, setCaptureTopic] = useState<string | null>(null);
-  useEffect(() => {
-    if (!extensionCommandIds.has(CMD_PLAY_START)) {
-      return;
-    }
-    let cancelled = false;
-    void recordingController.info().then((topic) => {
-      if (!cancelled) {
-        setCaptureTopic(topic);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [extensionCommandIds, recordingController]);
-  const [recordingDocId, setRecordingDocId] = useState<string | null>(null);
-  const recordingDocIdRef = useRef(recordingDocId);
-  recordingDocIdRef.current = recordingDocId;
-  const take = takeFromTopic(useTopic(captureTopic));
-  /** Whether the take topic has shown this take recording (to notice an external stop). */
-  const takeSeenRef = useRef(false);
   const [inputBindings, setInputBindings] = useState<BindingDto[]>([]);
   const inputBindingsRef = useRef(inputBindings);
   inputBindingsRef.current = inputBindings;
@@ -555,15 +574,16 @@ export default function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const pianoEntry = await getUserStateEntry<PianoRollUiEntry>(
-          ENTRY_PIANO_ROLL_UI,
-        );
+        // Records of extension node types need their editors before tabs are restored.
+        const loadedUi = await loadExtensionUi();
         if (cancelled) {
           return;
         }
-        if (pianoEntry) {
-          setPianoPrefs(pianoEntryToPrefs(pianoEntry, DEFAULT_PIANO_PREFS));
+        for (const warning of loadedUi.warnings) {
+          console.warn("imp-lab extension UI:", warning);
         }
+        setUi(loadedUi);
+        uiRef.current = loadedUi;
 
         const recordsUi = await getUserStateEntry<RecordsUiEntry>(ENTRY_RECORDS_UI);
         if (cancelled) {
@@ -572,9 +592,14 @@ export default function App() {
         if (recordsUi?.lastNewRecordStore) {
           setLastNewRecordStore(recordsUi.lastNewRecordStore);
         }
-        const savedKind = recordsUi?.explorerKindFilter as ExplorerKindFilter | undefined;
-        if (savedKind && EXPLORER_KINDS.includes(savedKind)) {
-          setKindFilter(savedKind);
+        const savedFilter = recordsUi?.explorerNodeType;
+        if (
+          savedFilter &&
+          (savedFilter === FILTER_OPENABLE ||
+            savedFilter === FILTER_ALL ||
+            nodeTypeInfos(loadedUi).some((t) => t.id === savedFilter))
+        ) {
+          setTypeFilter(savedFilter);
         }
 
         const openEntry = await getUserStateEntry<OpenDocumentsEntry>(
@@ -603,23 +628,19 @@ export default function App() {
 
         const nextDocs: EditorDocument[] = [];
         const nextHistories: Record<string, GraphHistory> = {};
-        const nextNotationHistories: Record<string, NotationHistory> = {};
-        const nextPlayheads: Record<string, number> = {};
+        const nextValueHistories: Record<string, ValueHistory<unknown>> = {};
         const warnings: string[] = [];
 
         for (const nodeId of nodeIds) {
           try {
             const dto = await recordOpen(nodeId);
-            const material = materializeOpenedDocument(dto);
+            const material = materializeOpenedDocument(loadedUi, dto);
             nextDocs.push(material.doc);
             if (material.graphHistory) {
               nextHistories[material.doc.id] = material.graphHistory;
             }
-            if (material.notationHistory) {
-              nextNotationHistories[material.doc.id] = material.notationHistory;
-            }
-            if (material.playhead !== undefined) {
-              nextPlayheads[material.doc.id] = material.playhead;
+            if (material.valueHistory) {
+              nextValueHistories[material.doc.id] = material.valueHistory;
             }
           } catch (err) {
             warnings.push(`${nodeId}: ${errorMessage(err)}`);
@@ -633,8 +654,7 @@ export default function App() {
 
         setDocuments(nextDocs);
         setHistories(nextHistories);
-        setNotationHistories(nextNotationHistories);
-        setPlayheads(nextPlayheads);
+        setValueHistories(nextValueHistories);
 
         const preferred = openEntry?.activeNodeId ?? null;
         const active =
@@ -681,12 +701,12 @@ export default function App() {
     }
     const entry: RecordsUiEntry = {
       lastNewRecordStore: lastNewRecordStore ?? undefined,
-      explorerKindFilter: kindFilter,
+      explorerNodeType: typeFilter,
     };
     void setUserStateEntry(ENTRY_RECORDS_UI, entry).catch((err) => {
       console.warn("user-state: persist records-ui failed", err);
     });
-  }, [kindFilter, lastNewRecordStore]);
+  }, [typeFilter, lastNewRecordStore]);
 
   /** Re-query the explorer list (and store counts) for the open project. */
   const refreshRecords = useCallback(async () => {
@@ -696,7 +716,7 @@ export default function App() {
     }
     try {
       const [list, info] = await Promise.all([
-        recordsList({ kind: kindFilter, text: filterText || null }),
+        recordsList({ nodeType: typeFilter, text: filterText || null }),
         projectCurrent(),
       ]);
       setRecords(list);
@@ -704,7 +724,7 @@ export default function App() {
     } catch (err) {
       setStatus(`Listing records failed · ${errorMessage(err)}`);
     }
-  }, [kindFilter, filterText]);
+  }, [typeFilter, filterText]);
   const refreshRecordsRef = useRef(refreshRecords);
   refreshRecordsRef.current = refreshRecords;
 
@@ -712,18 +732,6 @@ export default function App() {
     const handle = window.setTimeout(() => void refreshRecords(), 120);
     return () => window.clearTimeout(handle);
   }, [refreshRecords, project?.configPath]);
-
-  useEffect(() => {
-    if (!uiStateReadyRef.current) {
-      return;
-    }
-    void setUserStateEntry(
-      ENTRY_PIANO_ROLL_UI,
-      pianoPrefsToEntry(pianoPrefs),
-    ).catch((err) => {
-      console.warn("user-state: persist piano-roll-ui failed", err);
-    });
-  }, [pianoPrefs]);
 
   const active = useMemo(
     () => documents.find((doc) => doc.id === activeId) ?? documents[0],
@@ -783,7 +791,6 @@ export default function App() {
                 ...doc,
                 graph: history.present,
                 dirty: documentDirty(history, doc.record),
-                summary: summarizeGraph(history.present),
               }
             : doc,
         ),
@@ -792,18 +799,20 @@ export default function App() {
     [],
   );
 
-  const syncNotationFromHistory = useCallback(
-    (docId: string, history: NotationHistory) => {
-      setNotationHistories((prev) => ({ ...prev, [docId]: history }));
+  const syncValueFromHistory = useCallback(
+    (docId: string, history: ValueHistory<unknown>) => {
+      setValueHistories((prev) => ({ ...prev, [docId]: history }));
       setDocuments((prev) =>
         prev.map((doc) =>
           doc.id === docId
             ? {
                 ...doc,
-                notation: history.present,
-                dirty: notationDocDirty(history, doc.record),
-                summary: summarizeNotation(history.present),
-                title: history.present.title ?? doc.title,
+                value: history.present,
+                dirty: valueDocDirty(
+                  history,
+                  doc.record,
+                  editorFor(uiRef.current, doc.nodeType),
+                ),
               }
             : doc,
         ),
@@ -823,100 +832,18 @@ export default function App() {
     [syncDocFromHistory],
   );
 
-  const updateDocNotation = useCallback(
-    (docId: string, notation: Notation, coalesceKey?: string) => {
-      const baseline =
-        documentsRef.current.find((d) => d.id === docId)?.notation ??
-        emptyNotation(docId);
-      const current =
-        notationHistoriesRef.current[docId] ?? createNotationHistory(baseline);
-      syncNotationFromHistory(
-        docId,
-        pushNotation(current, notation, coalesceKey),
-      );
-    },
-    [syncNotationFromHistory],
-  );
-
-  /** Stops the take and adds its notes to the notation it was recorded into, as one edit. */
-  const stopRecording = useCallback(async () => {
-    const docId = recordingDocIdRef.current;
-    if (!docId) {
-      return;
-    }
-    recordingDocIdRef.current = null;
-    setRecordingDocId(null);
-    setNotationPlayingId(null);
-    setLivePlayheadBeats(null);
-    takeSeenRef.current = false;
-    try {
-      const notes = await recordingController.stop();
+  const updateDocValue = useCallback(
+    (docId: string, value: unknown, coalesceKey?: string) => {
       const doc = documentsRef.current.find((d) => d.id === docId);
-      if (doc?.notation && notes.length > 0) {
-        updateDocNotation(docId, applyTake(doc.notation, notes));
-        setStatus(`Recorded ${notes.length} note${notes.length === 1 ? "" : "s"}`);
-      } else {
-        setStatus("Recording stopped · no notes");
+      if (!doc) {
+        return;
       }
-    } catch (err) {
-      setStatus(`Recording failed · ${errorMessage(err)}`);
-    }
-  }, [recordingController, updateDocNotation]);
-
-  const toggleRecording = useCallback(async () => {
-    if (recordingDocIdRef.current) {
-      await stopRecording();
-      return;
-    }
-    if (!captureTopic) {
-      setStatus("Recording needs a playback extension pack");
-      return;
-    }
-    const docs = documentsRef.current;
-    const doc = docs.find((d) => d.id === activeId) ?? docs[0];
-    if (doc?.kind !== "notation" || !doc.notation) {
-      setStatus("Open a notation to record into");
-      return;
-    }
-    try {
-      auditionController.allOff();
-      const startBeats = playheadsRef.current[doc.id] ?? 0;
-      await recordingController.start(doc.notation, startBeats, pianoPrefs.click);
-      recordingDocIdRef.current = doc.id;
-      takeSeenRef.current = false;
-      setRecordingDocId(doc.id);
-      setNotationPlayingId(doc.id);
-      setStatus(pianoPrefs.click ? "Recording · count-in" : "Recording");
-    } catch (err) {
-      setStatus(`Recording failed · ${errorMessage(err)}`);
-    }
-  }, [
-    activeId,
-    auditionController,
-    captureTopic,
-    pianoPrefs.click,
-    recordingController,
-    stopRecording,
-  ]);
-
-  // The transport stopped some other way (menu Stop): collect the take.
-  useEffect(() => {
-    if (!recordingDocId) {
-      return;
-    }
-    if (take.recording) {
-      takeSeenRef.current = true;
-    } else if (takeSeenRef.current) {
-      void stopRecording();
-    }
-  }, [recordingDocId, stopRecording, take.recording]);
-
-  // Leaving the notation (tab switch or close) ends the take there.
-  useEffect(() => {
-    if (recordingDocIdRef.current && recordingDocIdRef.current !== activeId) {
-      void stopRecording();
-    }
-  }, [activeId, stopRecording]);
+      const current = valueHistoriesRef.current[docId] ?? createValueHistory(doc.value);
+      const equals = editorEquals(editorFor(uiRef.current, doc.nodeType));
+      syncValueFromHistory(docId, pushValue(current, value, coalesceKey, equals));
+    },
+    [syncValueFromHistory],
+  );
 
   const clearTitleCommitTimer = useCallback(() => {
     if (titleCommitTimer.current != null) {
@@ -1048,7 +975,7 @@ export default function App() {
   }, [clearTitleCommitTimer]);
 
   /** Add an opened record as a tab (or activate it when already open). */
-  const addOpenedDocument = useCallback((dto: DocumentSummaryDto) => {
+  const addOpenedDocument = useCallback((dto: RecordDocumentDto) => {
     const existing = documentsRef.current.find(
       (d) => d.record?.nodeId === dto.record.nodeId,
     );
@@ -1057,14 +984,10 @@ export default function App() {
       setActiveId(existing.id);
       return existing;
     }
-    const material = materializeOpenedDocument(dto);
+    const material = materializeOpenedDocument(uiRef.current, dto);
     const opened = material.doc;
-    if (material.notationHistory) {
-      setNotationHistories((prev) => ({
-        ...prev,
-        [opened.id]: material.notationHistory!,
-      }));
-      setPlayheads((prev) => ({ ...prev, [opened.id]: material.playhead ?? 0 }));
+    if (material.valueHistory) {
+      setValueHistories((prev) => ({ ...prev, [opened.id]: material.valueHistory! }));
     }
     if (material.graphHistory) {
       setHistories((prev) => ({ ...prev, [opened.id]: material.graphHistory! }));
@@ -1094,13 +1017,13 @@ export default function App() {
   /** Replace a clean open tab with the record's current content (external edits). */
   const reloadOpenRecord = useCallback(async (docId: string, nodeId: string) => {
     try {
-      const material = materializeOpenedDocument(await recordOpen(nodeId));
+      const material = materializeOpenedDocument(uiRef.current, await recordOpen(nodeId));
       setDocuments((prev) => prev.map((d) => (d.id === docId ? material.doc : d)));
       if (material.graphHistory) {
         setHistories((prev) => ({ ...prev, [docId]: material.graphHistory! }));
       }
-      if (material.notationHistory) {
-        setNotationHistories((prev) => ({ ...prev, [docId]: material.notationHistory! }));
+      if (material.valueHistory) {
+        setValueHistories((prev) => ({ ...prev, [docId]: material.valueHistory! }));
       }
     } catch (err) {
       console.warn("reload record failed", nodeId, err);
@@ -1116,26 +1039,14 @@ export default function App() {
       return { ...rest, [nextId]: map(current as T) };
     };
     setHistories((prev) => rekey(prev, markSaved));
-    setNotationHistories((prev) => rekey(prev, markNotationSaved));
-    setPlayheads((prev) => rekey(prev, (p) => p ?? 0));
+    setValueHistories((prev) => rekey(prev, markValueSaved));
     const storeLabel =
       projectRef.current?.stores.find((s) => s.id === result.record.corpusId)?.label ??
       result.record.corpusId;
     setDocuments((prev) =>
       prev.map((d) =>
         d.id === docId
-          ? {
-              ...d,
-              id: nextId,
-              dirty: false,
-              record: result.record,
-              title: result.title,
-              properties: d.properties.map((row) => {
-                if (row.label === "Store") return { ...row, value: storeLabel };
-                if (row.label === "Title") return { ...row, value: result.title };
-                return row;
-              }),
-            }
+          ? { ...d, id: nextId, dirty: false, record: result.record, title: result.title }
           : d,
       ),
     );
@@ -1155,7 +1066,10 @@ export default function App() {
       }
       if (doc.record) {
         try {
-          applySaveResult(doc.id, await recordSave(doc.record.nodeId, payloadFor(doc)));
+          applySaveResult(
+            doc.id,
+            await recordSave(doc.record.nodeId, payloadFor(uiRef.current, doc)),
+          );
           return true;
         } catch (err) {
           setStatus(`Save failed · ${errorMessage(err)}`);
@@ -1169,7 +1083,7 @@ export default function App() {
           title: doc.title,
           defaultStoreId: defaultSaveStore(projectRef.current, lastNewRecordStore),
         },
-        payload: payloadFor(doc),
+        payload: payloadFor(uiRef.current, doc),
       });
       return false;
     },
@@ -1187,7 +1101,7 @@ export default function App() {
   }, [activeId, saveDocument]);
 
   const requestDuplicate = useCallback(
-    (title: string, kind: DocumentKind, payload: RecordPayload, docId: string) => {
+    (title: string, payload: RecordPayload, docId: string) => {
       if (!projectRef.current) {
         setStatus("Open or create a project first");
         return;
@@ -1199,7 +1113,7 @@ export default function App() {
           title: `${title} copy`,
           defaultStoreId: defaultSaveStore(projectRef.current, lastNewRecordStore),
         },
-        payload: { ...payload, kind },
+        payload,
       });
     },
     [lastNewRecordStore],
@@ -1211,7 +1125,7 @@ export default function App() {
       setStatus("Nothing to duplicate");
       return;
     }
-    requestDuplicate(doc.title, doc.kind, payloadFor(doc), doc.id);
+    requestDuplicate(doc.title, payloadFor(uiRef.current, doc), doc.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId, requestDuplicate]);
 
@@ -1219,11 +1133,7 @@ export default function App() {
     async (record: RecordSummary) => {
       try {
         const dto = await recordOpen(record.nodeId);
-        const payload: RecordPayload =
-          dto.kind === "notation"
-            ? { kind: "notation", notation: dto.notation }
-            : { kind: "imp-graph", graph: dto.graph };
-        requestDuplicate(dto.title, dto.kind, payload, dto.id);
+        requestDuplicate(dto.title, { nodeType: dto.nodeType, value: dto.value }, dto.id);
       } catch (err) {
         setStatus(`Duplicate failed · ${errorMessage(err)}`);
       }
@@ -1254,13 +1164,19 @@ export default function App() {
 
   /** Explorer "+": create an empty record directly in a store and open it. */
   const newRecordInStore = useCallback(
-    async (storeId: string, kind: DocumentKind) => {
-      const title = kind === "notation" ? "Untitled notation" : "Untitled graph";
+    async (storeId: string, nodeType: string) => {
+      const label = (
+        nodeTypeInfos(uiRef.current).find((t) => t.id === nodeType)?.label ?? "record"
+      ).toLowerCase();
       try {
-        const result = await recordCreate(title, storeId, emptyPayload(kind));
+        const result = await recordCreate(
+          `Untitled ${label}`,
+          storeId,
+          emptyPayload(uiRef.current, nodeType),
+        );
         setLastNewRecordStore(storeId);
         await openRecord(result.record.nodeId);
-        setStatus(`New ${kind === "notation" ? "notation" : "graph"} · ${storeId}`);
+        setStatus(`New ${label} · ${storeId}`);
       } catch (err) {
         setStatus(`Create failed · ${errorMessage(err)}`);
       }
@@ -1273,15 +1189,7 @@ export default function App() {
       await recordRename(nodeId, title);
       setDocuments((prev) =>
         prev.map((d) =>
-          d.record?.nodeId === nodeId
-            ? {
-                ...d,
-                title,
-                properties: d.properties.map((row) =>
-                  row.label === "Title" ? { ...row, value: title } : row,
-                ),
-              }
-            : d,
+          d.record?.nodeId === nodeId ? { ...d, title } : d,
         ),
       );
       setStatus(`Renamed · ${title}`);
@@ -1298,8 +1206,7 @@ export default function App() {
       return rest;
     };
     setHistories(drop);
-    setNotationHistories(drop);
-    setPlayheads(drop);
+    setValueHistories(drop);
     const remaining = documentsRef.current.filter((d) => d.id !== docId);
     setDocuments(remaining);
     setActiveId((current) => (current === docId ? (remaining[0]?.id ?? "") : current));
@@ -1455,13 +1362,13 @@ export default function App() {
       setStatus("Nothing to undo");
       return;
     }
-    if (doc.kind === "notation") {
-      const history = notationHistories[doc.id];
-      if (!history || !canUndoNotation(history)) {
+    if (!isImpGraph(doc)) {
+      const history = valueHistories[doc.id];
+      if (!history || !canUndoValue(history)) {
         setStatus("Nothing to undo");
         return;
       }
-      syncNotationFromHistory(doc.id, undoNotation(history));
+      syncValueFromHistory(doc.id, undoValue(history));
       setStatus("Undo");
       return;
     }
@@ -1477,9 +1384,9 @@ export default function App() {
     activeId,
     documents,
     histories,
-    notationHistories,
+    valueHistories,
     syncDocFromHistory,
-    syncNotationFromHistory,
+    syncValueFromHistory,
   ]);
 
   const redoActive = useCallback(() => {
@@ -1492,13 +1399,13 @@ export default function App() {
       setStatus("Nothing to redo");
       return;
     }
-    if (doc.kind === "notation") {
-      const history = notationHistories[doc.id];
-      if (!history || !canRedoNotation(history)) {
+    if (!isImpGraph(doc)) {
+      const history = valueHistories[doc.id];
+      if (!history || !canRedoValue(history)) {
         setStatus("Nothing to redo");
         return;
       }
-      syncNotationFromHistory(doc.id, redoNotation(history));
+      syncValueFromHistory(doc.id, redoValue(history));
       setStatus("Redo");
       return;
     }
@@ -1514,16 +1421,16 @@ export default function App() {
     activeId,
     documents,
     histories,
-    notationHistories,
+    valueHistories,
     syncDocFromHistory,
-    syncNotationFromHistory,
+    syncValueFromHistory,
   ]);
 
   /** Opens the active graph's node-type picker (the graph view also opens it on Shift+A). */
   const openAddNodeInActive = useCallback(() => {
     const docs = documentsRef.current;
     const doc = docs.find((d) => d.id === activeId) ?? docs[0];
-    if (!doc || doc.kind !== "imp-graph") {
+    if (!doc || !isImpGraph(doc)) {
       setStatus("Open or create a graph first");
       return;
     }
@@ -1535,27 +1442,16 @@ export default function App() {
       const docs = documentsRef.current;
       const doc = docs.find((d) => d.id === activeId) ?? docs[0];
       // Extensions get the project config, so they can look up referenced records (a graph
-      // using a notation) across every data store of the project.
+      // using another record) across every data store of the project.
       const neighborPath = project?.configPath ?? null;
 
-      let graphJson: string | null = null;
-      if (doc?.kind === "notation" && doc.notation) {
-        if (id === "play.start" || id === "play.toggle" || id === "play.stop") {
-          const parked = playheadsRef.current[doc.id] ?? 0;
-          graphJson = JSON.stringify({
-            ...doc.notation,
-            labStartBeats: parked,
-          });
-        }
-      } else if (doc?.graph) {
-        graphJson = JSON.stringify(doc.graph);
-      }
+      // The active document's value: the graph, or an extension node type's stored value.
+      const graphJson = doc
+        ? JSON.stringify(isImpGraph(doc) ? doc.graph : payloadFor(uiRef.current, doc).value)
+        : null;
 
-      if (
-        !graphJson &&
-        (id === "play.start" || id === "play.toggle")
-      ) {
-        setStatus("Open a graph or notation document before playing");
+      if (!graphJson && (id === CMD_PLAY_START || id === CMD_PLAY_TOGGLE)) {
+        setStatus("Open a document before playing");
         return;
       }
 
@@ -1566,37 +1462,10 @@ export default function App() {
           neighborPath,
         });
         if (id === "play.stop") {
-          setNotationPlayingId(null);
-          setLivePlayheadBeats(null);
           setStatus("Playback stopped");
-        } else if (id === "play.start") {
-          if (doc?.kind === "notation") {
-            setNotationPlayingId(doc.id);
-          } else {
-            setNotationPlayingId(null);
-            setLivePlayheadBeats(null);
-          }
+        } else if (id === CMD_PLAY_START) {
           setStatus("Playback started");
-        } else if (id === "play.toggle") {
-          try {
-            const status = await invoke<PlaybackStatusDto>(
-              "get_playback_status",
-            );
-            // Status is post-toggle: playing means we just started.
-            if (status.playing && doc?.kind === "notation") {
-              setNotationPlayingId(doc.id);
-            } else {
-              setNotationPlayingId(null);
-              setLivePlayheadBeats(null);
-            }
-          } catch {
-            if (doc?.kind === "notation") {
-              setNotationPlayingId(doc.id);
-            } else {
-              setNotationPlayingId(null);
-              setLivePlayheadBeats(null);
-            }
-          }
+        } else if (id === CMD_PLAY_TOGGLE) {
           setStatus("Playback toggled");
         } else {
           setStatus(`Ran · ${id}`);
@@ -1609,8 +1478,24 @@ export default function App() {
     [activeId, project],
   );
 
+  /** New, unsaved document of an extension editor's node type. */
+  const newEditorDocument = useCallback((editor: LoadedEditor) => {
+    const value = editor.implementation.empty();
+    const doc = newUntitledDocument(editor.nodeTypeId, editor.label, { value });
+    setDocuments((prev) => [...prev, doc]);
+    setValueHistories((prev) => ({ ...prev, [doc.id]: createValueHistory(value) }));
+    setActiveId(doc.id);
+    setStatus(`New ${editor.label.toLowerCase()} · ${doc.title}`);
+  }, []);
+
   const dispatchCommand = useCallback(
     (id: string) => {
+      // The active document's extension editor gets first refusal.
+      const activeDocId =
+        documentsRef.current.find((d) => d.id === activeId)?.id ?? documentsRef.current[0]?.id;
+      if (activeDocId && commandHandlers.current.get(activeDocId)?.(id)) {
+        return;
+      }
       switch (id) {
         case CMD_PROJECT_OPEN:
           void activateProject(projectPickAndOpen);
@@ -1642,7 +1527,9 @@ export default function App() {
           duplicateActive();
           break;
         case CMD_DOCUMENT_NEW_GRAPH: {
-          const doc = newUntitledDocument("imp-graph");
+          const doc = newUntitledDocument(IMP_GRAPH_NODE_TYPE, "graph", {
+            graph: emptyImpGraph(),
+          });
           setDocuments((prev) => [...prev, doc]);
           setHistories((prev) => ({
             ...prev,
@@ -1650,20 +1537,6 @@ export default function App() {
           }));
           setActiveId(doc.id);
           setStatus(`New graph · ${doc.title}`);
-          break;
-        }
-        case CMD_DOCUMENT_NEW_NOTATION: {
-          const doc = newUntitledDocument("notation");
-          setDocuments((prev) => [...prev, doc]);
-          setNotationHistories((prev) => ({
-            ...prev,
-            [doc.id]: createNotationHistory(
-              doc.notation ?? emptyNotation(doc.id),
-            ),
-          }));
-          setPlayheads((prev) => ({ ...prev, [doc.id]: 0 }));
-          setActiveId(doc.id);
-          setStatus(`New notation · ${doc.title}`);
           break;
         }
         case CMD_DOCUMENT_CLOSE_ACTIVE:
@@ -1678,58 +1551,34 @@ export default function App() {
         case CMD_VIEW_TOGGLE_COLOR_SCHEME:
           toggleColorScheme();
           break;
-        case CMD_NOTATION_TOOL_DRAW:
-          setPianoPrefs((p) => ({ ...p, tool: "draw" }));
-          setStatus("Tool · Draw");
-          break;
-        case CMD_NOTATION_TOOL_SELECT:
-          setPianoPrefs((p) => ({ ...p, tool: "select" }));
-          setStatus("Tool · Select");
-          break;
-        case CMD_NOTATION_TOOL_ERASE:
-          setPianoPrefs((p) => ({ ...p, tool: "erase" }));
-          setStatus("Tool · Erase");
-          break;
-        case CMD_NOTATION_SNAP_TOGGLE:
-          setPianoPrefs((p) => {
-            const snapEnabled = !p.snapEnabled;
-            setStatus(snapEnabled ? "Snap on" : "Snap off");
-            return { ...p, snapEnabled };
-          });
-          break;
         case CMD_SETTINGS_OPEN:
           openSettings(null);
           break;
-        case CMD_NOTATION_RECORD_TOGGLE:
-          void toggleRecording();
-          break;
-        default:
-          // Space (or Play › Stop) during a take ends the take and keeps its notes.
-          if (
-            recordingDocIdRef.current &&
-            (id === CMD_PLAY_TOGGLE || id === CMD_PLAY_STOP)
-          ) {
-            void stopRecording();
+        default: {
+          const editor = uiRef.current.editors.find((e) => newRecordCommand(e.id) === id);
+          if (editor) {
+            newEditorDocument(editor);
           } else if (extensionCommandIdsRef.current.has(id)) {
             void runExtensionCommand(id);
           } else {
             setStatus(`Unhandled command · ${id}`);
           }
           break;
+        }
       }
     },
     [
       activateProject,
+      activeId,
       closeActive,
       duplicateActive,
+      newEditorDocument,
       openAddNodeInActive,
       openSettings,
       redoActive,
       runExtensionCommand,
       saveActive,
-      stopRecording,
       toggleColorScheme,
-      toggleRecording,
       undoActive,
     ],
   );
@@ -1777,45 +1626,23 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [dispatchCommand]);
 
-  // Notation playhead follows the Lab playback clock; snaps back when stopped.
-  useEffect(() => {
-    if (!notationPlayingId) {
-      setLivePlayheadBeats(null);
-      return;
-    }
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const status = await invoke<PlaybackStatusDto>("get_playback_status");
-        if (cancelled) {
-          return;
-        }
-        const doc = documentsRef.current.find(
-          (d) => d.id === notationPlayingId,
-        );
-        if (!doc?.notation) {
-          return;
-        }
-        if (!status.playing) {
-          setNotationPlayingId(null);
-          setLivePlayheadBeats(null);
-          return;
-        }
-        setLivePlayheadBeats(
-          secondsToBeats(status.positionSecs, doc.notation.tempoBpm),
-        );
-      } catch {
-        // Pack may be absent; ignore tick errors.
-      }
-    };
-    const handle = window.setInterval(() => {
-      void tick();
-    }, 33);
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-    };
-  }, [notationPlayingId]);
+  const storeLabelOf = (doc: EditorDocument) =>
+    doc.record
+      ? (project?.stores.find((s) => s.id === doc.record?.corpusId)?.label ??
+        doc.record.corpusId)
+      : "Not saved yet";
+
+  const propertyRows = (doc: EditorDocument) =>
+    docProperties(ui, doc, storeLabelOf(doc)).map((row) => (
+      <Group key={row.label} gap="xs" justify="space-between" wrap="nowrap">
+        <Text size="xs" c="dimmed">
+          {row.label}
+        </Text>
+        <Text size="xs" ta="right" lineClamp={1}>
+          {row.value}
+        </Text>
+      </Group>
+    ));
 
   return (
     <AppShell
@@ -1865,8 +1692,9 @@ export default function App() {
         <RecordExplorer
           project={project}
           records={records}
-          kindFilter={kindFilter}
-          onKindFilterChange={setKindFilter}
+          nodeTypes={nodeTypes}
+          typeFilter={typeFilter}
+          onTypeFilterChange={setTypeFilter}
           text={filterText}
           onTextChange={setFilterText}
           filterRef={filterRef}
@@ -1875,7 +1703,7 @@ export default function App() {
           }
           activeNodeId={active?.record?.nodeId ?? null}
           onOpen={(record) => void openRecord(record.nodeId)}
-          onNewInStore={(storeId, kind) => void newRecordInStore(storeId, kind)}
+          onNewInStore={(storeId, nodeType) => void newRecordInStore(storeId, nodeType)}
           onRename={(nodeId, title) => void renameRecord(nodeId, title)}
           onArchive={(nodeId) => void archiveRecord(nodeId)}
           onDuplicate={(record) => void duplicateRecord(record)}
@@ -1887,6 +1715,7 @@ export default function App() {
           open={recordSearchOpen}
           onClose={() => setRecordSearchOpen(false)}
           project={project}
+          nodeTypes={nodeTypes}
           onOpen={(record) => void openRecord(record.nodeId)}
         />
       </AppShell.Navbar>
@@ -1898,27 +1727,8 @@ export default function App() {
             <Text size="xs" c="dimmed">
               No document
             </Text>
-          ) : active.kind === "notation" ? (
-            <Stack gap={4}>
-              <Text size="xs" c="dimmed">
-                No graph selection
-              </Text>
-              {active.properties.map((row) => (
-                <Group
-                  key={row.label}
-                  gap="xs"
-                  justify="space-between"
-                  wrap="nowrap"
-                >
-                  <Text size="xs" c="dimmed">
-                    {row.label}
-                  </Text>
-                  <Text size="xs" ta="right" lineClamp={1}>
-                    {row.value}
-                  </Text>
-                </Group>
-              ))}
-            </Stack>
+          ) : !isImpGraph(active) ? (
+            <Stack gap={4}>{propertyRows(active)}</Stack>
           ) : selectedLocalNode ? (
             <Stack gap={6}>
               <TextInput
@@ -2075,21 +1885,7 @@ export default function App() {
               <Text size="xs" c="dimmed">
                 Select a node…
               </Text>
-              {active.properties.map((row) => (
-                <Group
-                  key={row.label}
-                  gap="xs"
-                  justify="space-between"
-                  wrap="nowrap"
-                >
-                  <Text size="xs" c="dimmed">
-                    {row.label}
-                  </Text>
-                  <Text size="xs" ta="right" lineClamp={1}>
-                    {row.value}
-                  </Text>
-                </Group>
-              ))}
+              {propertyRows(active)}
             </Stack>
           )}
         </Stack>
@@ -2104,7 +1900,7 @@ export default function App() {
               </Text>
               <Text size="xs" c="dimmed" ta="center">
                 {project
-                  ? "Open a record from the explorer, or File → New graph / New notation"
+                  ? "Open a record from the explorer, or File → New graph"
                   : "File → New Project… or Open Project… to work with data stores"}
               </Text>
             </Stack>
@@ -2128,55 +1924,42 @@ export default function App() {
                 <Box p="md" className={classes.content}>
                   <Group gap="xs" mb="sm">
                     <Badge size="sm" variant="outline">
-                      {doc.kind}
+                      {nodeTypes.find((t) => t.id === doc.nodeType)?.label.toLowerCase() ??
+                        doc.nodeType}
                     </Badge>
                     <Text size="xs" c="dimmed" lineClamp={1}>
-                      {doc.record
-                        ? (project?.stores.find((s) => s.id === doc.record?.corpusId)
-                            ?.label ?? doc.record.corpusId)
-                        : "Not saved yet"}
+                      {storeLabelOf(doc)}
                     </Text>
                   </Group>
                   <Title order={4} mb="xs">
                     {doc.title}
                   </Title>
-                  <Text size="sm">{doc.summary}</Text>
+                  <Text size="sm">{summarizeDoc(ui, doc)}</Text>
                   <Box className={classes.canvas}>
-                    {doc.kind === "notation" ? (
-                      <PianoRollPanel
-                        notation={doc.notation ?? emptyNotation(doc.id)}
-                        playheadBeats={
-                          notationPlayingId === doc.id &&
-                          livePlayheadBeats != null
-                            ? livePlayheadBeats
-                            : (playheads[doc.id] ?? 0)
-                        }
-                        prefs={pianoPrefs}
-                        audition={audition}
-                        recording={
-                          captureTopic
-                            ? {
-                                active: recordingDocId === doc.id,
-                                countIn:
-                                  recordingDocId === doc.id && take.countIn,
-                                takeNotes:
-                                  recordingDocId === doc.id ? take.notes : [],
-                                onToggle: () => void toggleRecording(),
-                              }
-                            : null
-                        }
-                        toolbarExtra={statusItems}
-                        onPrefsChange={setPianoPrefs}
-                        onNotationChange={(notation, coalesceKey) =>
-                          updateDocNotation(doc.id, notation, coalesceKey)
-                        }
-                        onPlayheadChange={(beats) =>
-                          setPlayheads((prev) => ({
-                            ...prev,
-                            [doc.id]: beats,
-                          }))
-                        }
-                      />
+                    {!isImpGraph(doc) ? (
+                      (() => {
+                        const editor = editorFor(ui, doc.nodeType);
+                        return editor ? (
+                          <ExtensionEditorPanel
+                            editor={editor}
+                            docId={doc.id}
+                            value={doc.value}
+                            active={doc.id === (activeId || documents[0]?.id)}
+                            neighborPath={project?.configPath ?? null}
+                            extensionCommandIds={extensionCommandIds}
+                            statusItems={statusItems}
+                            setStatus={setStatus}
+                            onChange={(value, coalesceKey) =>
+                              updateDocValue(doc.id, value, coalesceKey)
+                            }
+                            setCommandHandler={setCommandHandler}
+                          />
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            No editor for this node type.
+                          </Text>
+                        );
+                      })()
                     ) : (
                       <GraphErrorBoundary resetKey={doc.id}>
                         <LabGraphPanel

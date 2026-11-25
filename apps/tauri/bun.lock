@@ -12,6 +12,7 @@
         "elkjs": "^0.12.1",
         "imp-core-types": "workspace:*",
         "imp-graph-view": "workspace:*",
+        "imp-lab-ui": "workspace:*",
         "imp-registry": "workspace:*",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
@@ -151,6 +152,10 @@
         "imp-pathing": "workspace:^0.7.0",
         "typescript": "5.8.2",
       },
+    },
+    "../../packages/imp-lab-ui": {
+      "name": "imp-lab-ui",
+      "version": "0.1.0",
     },
   },
   "packages": {
@@ -451,6 +456,8 @@
     "imp-graph-resolve": ["imp-graph-resolve@workspace:../../../imp-ts/packages/imp-graph-resolve"],
 
     "imp-graph-view": ["imp-graph-view@workspace:../../../imp-graph-view"],
+
+    "imp-lab-ui": ["imp-lab-ui@workspace:../../packages/imp-lab-ui"],
 
     "imp-pathing": ["imp-pathing@workspace:../../../imp-ts/packages/imp-pathing"],
 

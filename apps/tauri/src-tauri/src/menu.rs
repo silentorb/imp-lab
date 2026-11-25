@@ -14,7 +14,6 @@ const CMD_PROJECT_NEW: &str = "project.new";
 const CMD_PROJECT_OPEN: &str = "project.open";
 const CMD_PROJECT_MANAGE_STORES: &str = "project.manage-stores";
 const CMD_DOCUMENT_NEW_GRAPH: &str = "document.new.graph";
-const CMD_DOCUMENT_NEW_NOTATION: &str = "document.new.notation";
 const CMD_DOCUMENT_SAVE: &str = "document.save";
 const CMD_DOCUMENT_DUPLICATE: &str = "document.duplicate-to-store";
 const CMD_DOCUMENT_CLOSE_ACTIVE: &str = "document.close_active";
@@ -41,17 +40,31 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         bindings,
     )?;
     let new_graph = item(app, CMD_DOCUMENT_NEW_GRAPH, "New graph", bindings)?;
-    let new_notation = item(app, CMD_DOCUMENT_NEW_NOTATION, "New notation", bindings)?;
+    // One New item per extension editor (`node-type-editor` components).
+    let new_records = extensions::editors()
+        .iter()
+        .map(|editor| {
+            item(
+                app,
+                &extensions::new_record_command(&editor.id),
+                &format!("New {}", editor.label.to_lowercase()),
+                bindings,
+            )
+        })
+        .collect::<tauri::Result<Vec<_>>>()?;
     let save = item(app, CMD_DOCUMENT_SAVE, "Save", bindings)?;
     let duplicate = item(app, CMD_DOCUMENT_DUPLICATE, "Duplicate to Store…", bindings)?;
     let close = item(app, CMD_DOCUMENT_CLOSE_ACTIVE, "Close", bindings)?;
-    let file = SubmenuBuilder::new(app, "File")
+    let mut file = SubmenuBuilder::new(app, "File")
         .item(&new_project)
         .item(&open_project)
         .item(&manage_stores)
         .separator()
-        .item(&new_graph)
-        .item(&new_notation)
+        .item(&new_graph);
+    for new_record in &new_records {
+        file = file.item(new_record);
+    }
+    let file = file
         .item(&save)
         .item(&duplicate)
         .item(&close)

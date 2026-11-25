@@ -5,7 +5,7 @@ FROM ${BASE_IMAGE}
 
 USER root
 
-# Tauri Linux prerequisites (WebKitGTK runtime + build deps). No Iced/wgpu set.
+# Tauri Linux prerequisites (WebKitGTK runtime + build deps).
 RUN apt-get update -qq \
  && apt-get install -y -qq \
       build-essential \

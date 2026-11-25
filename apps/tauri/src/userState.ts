@@ -1,10 +1,8 @@
-/** Thin client for host-owned UI-state persistence (tabs, piano prefs). */
+/** Thin client for host-owned UI-state persistence (tabs, explorer prefs, component prefs). */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { PianoRollUiPrefs } from "./piano-roll";
 
 export const ENTRY_OPEN_DOCUMENTS = "open-documents";
-export const ENTRY_PIANO_ROLL_UI = "piano-roll-ui";
 export const ENTRY_RECORDS_UI = "records-ui";
 
 /** Open project and record tabs (pre-project `openPaths` entries are ignored). */
@@ -17,17 +15,8 @@ export type OpenDocumentsEntry = {
 /** Record explorer prefs. */
 export type RecordsUiEntry = {
   lastNewRecordStore?: string | null;
-  explorerKindFilter?: string | null;
-};
-
-export type PianoRollUiEntry = {
-  activeTool: string;
-  snapEnabled: boolean;
-  snapResolution: string;
-  /** Absent in entries saved before audition existed. */
-  audition?: boolean;
-  /** Absent in entries saved before recording existed. */
-  click?: boolean;
+  /** A node type id, `openable` or `all`. */
+  explorerNodeType?: string | null;
 };
 
 export async function getUserStateEntry<T>(
@@ -41,46 +30,6 @@ export async function setUserStateEntry(
   value: unknown,
 ): Promise<void> {
   await invoke("set_user_state_entry", { entryId, value });
-}
-
-export function pianoPrefsToEntry(prefs: PianoRollUiPrefs): PianoRollUiEntry {
-  return {
-    activeTool: prefs.tool,
-    snapEnabled: prefs.snapEnabled,
-    snapResolution: prefs.snapResolution,
-    audition: prefs.audition,
-    click: prefs.click,
-  };
-}
-
-export function pianoEntryToPrefs(
-  entry: PianoRollUiEntry | null | undefined,
-  fallback: PianoRollUiPrefs,
-): PianoRollUiPrefs {
-  if (!entry) {
-    return fallback;
-  }
-  const tool =
-    entry.activeTool === "draw" ||
-    entry.activeTool === "select" ||
-    entry.activeTool === "erase"
-      ? entry.activeTool
-      : fallback.tool;
-  const snapResolution =
-    entry.snapResolution === "1/4" ||
-    entry.snapResolution === "1/8" ||
-    entry.snapResolution === "1/16" ||
-    entry.snapResolution === "1/32"
-      ? entry.snapResolution
-      : fallback.snapResolution;
-  return {
-    tool,
-    snapEnabled: Boolean(entry.snapEnabled),
-    snapResolution,
-    audition:
-      typeof entry.audition === "boolean" ? entry.audition : fallback.audition,
-    click: typeof entry.click === "boolean" ? entry.click : fallback.click,
-  };
 }
 
 export function collectOpenDocumentsEntry(

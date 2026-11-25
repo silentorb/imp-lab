@@ -9,7 +9,6 @@ export const CMD_RECORDS_SEARCH = "records.search";
 /** Open the active graph's node-type picker. */
 export const CMD_GRAPH_ADD_NODE = "graph.add-node";
 export const CMD_DOCUMENT_NEW_GRAPH = "document.new.graph";
-export const CMD_DOCUMENT_NEW_NOTATION = "document.new.notation";
 export const CMD_DOCUMENT_SAVE = "document.save";
 export const CMD_DOCUMENT_DUPLICATE = "document.duplicate-to-store";
 export const CMD_DOCUMENT_CLOSE_ACTIVE = "document.close_active";
@@ -17,12 +16,7 @@ export const CMD_EDIT_UNDO = "edit.undo";
 export const CMD_EDIT_REDO = "edit.redo";
 export const CMD_VIEW_TOGGLE_COLOR_SCHEME = "view.toggle-color-scheme";
 
-export const CMD_NOTATION_TOOL_DRAW = "notation.tool.draw";
-export const CMD_NOTATION_TOOL_SELECT = "notation.tool.select";
-export const CMD_NOTATION_TOOL_ERASE = "notation.tool.erase";
-export const CMD_NOTATION_SNAP_TOGGLE = "notation.snap.toggle";
-
-/** Extension-contributed play commands (present when Aura playback pack is loaded). */
+/** Extension-contributed play commands (present when a playback pack is loaded). */
 export const CMD_PLAY_START = "play.start";
 export const CMD_PLAY_STOP = "play.stop";
 export const CMD_PLAY_TOGGLE = "play.toggle";
@@ -37,5 +31,3 @@ export type EditorCommandPayload = {
 
 /** Lab settings dialog (extension settings, one page per category). */
 export const CMD_SETTINGS_OPEN = "settings.open";
-/** Start / stop recording a take into the active notation. */
-export const CMD_NOTATION_RECORD_TOGGLE = "notation.record.toggle";

@@ -2,7 +2,7 @@
 
 ## Summary
 
-Imp Lab persists **editor UI chrome** across launches: open saved tabs, piano-roll tool/snap prefs, and main-window geometry. This is ordinary durable local UI state — not document content, not a start/finish “session.” It also stores extension setting values for the [Settings](settings.md) dialog.
+Imp Lab persists **editor UI chrome** across launches: open saved tabs, explorer prefs, extension UI components' own prefs, and main-window geometry. This is ordinary durable local UI state — not document content, not a start/finish “session.” It also stores extension setting values for the [Settings](settings.md) dialog.
 
 ## Location
 
@@ -27,9 +27,9 @@ Each bucket is `{config_dir}/{bucket}.json` with envelope:
 | Entry id | Bucket file | Shape |
 | --- | --- | --- |
 | `open-documents` | `documents.json` | optional `projectPath`, `openNodeIds` (string[]), optional `activeNodeId` |
-| `piano-roll-ui` | `ui.json` | `activeTool`, `snapEnabled`, `snapResolution`, `audition`, `click` |
+| `component:<componentId>` | `ui.json` | an extension UI component's own prefs (an editor's tool settings, say), opaque to Lab |
 | `extension-settings` | `settings.json` | `{settingId: value}`: extension setting values, opaque to Lab ([settings](settings.md)) |
-| `records-ui` | `ui.json` | optional `lastNewRecordStore`, optional `explorerKindFilter` (`lab` \| `imp-graph` \| `notation` \| `all`) |
+| `records-ui` | `ui.json` | optional `lastNewRecordStore`, optional `explorerNodeType` (a node type id, `openable` or `all`) |
 | `window` | `window.json` | `width`, `height`, optional `x`/`y`, `maximized` |
 
 Missing file, missing entry, unsupported `version`, or invalid JSON → defaults for that bucket/entry; the app still starts (with logging).
@@ -45,13 +45,12 @@ Missing file, missing entry, unsupported `version`, or invalid JSON → defaults
 ### Records UI
 
 - `lastNewRecordStore`: default store in the "Save new record" dialog (falls back to the primary store when it is gone or read-only)
-- `explorerKindFilter`: the Record Explorer's kind filter
+- `explorerNodeType`: the Record Explorer's node-type filter (a saved type with no editor any more falls back to `openable`)
 
-### Piano roll UI
+### Component prefs
 
-- Global prefs (not per document): tool `draw` \| `select` \| `erase`, snap on/off, resolution `1/4` \| `1/8` \| `1/16` \| `1/32`, note audition on/off, recording click (metronome + count-in) on/off
-- Defaults: draw, snap on, `1/16`, audition on, click on (entries saved without `audition` or `click` read as on)
-- Collect on tool / snap / audition changes; apply once at startup
+- One entry per extension UI component (`component:` + component id), read and written by the component through `EditorHost.loadPrefs` / `savePrefs`; Lab doesn't interpret it
+- Prefs that are not per document (shared by every open document of that editor)
 
 ### Window
 
@@ -86,6 +85,6 @@ Mantine color scheme stays on webview `localStorage` (`imp-lab-color-scheme`) fo
 - General app/settings configuration or layered install/project/user config
 - Shell pane trees, pan/zoom camera, selection, recent-files list
 - Graph connection-mode / add-node-type prefs (not in the desktop UI yet)
-- Extension `user-state` registration
+- Extension-defined buckets (components get one opaque `component:` entry each)
 - In-app settings UI for these entries
 - Persisting untitled dirty buffers

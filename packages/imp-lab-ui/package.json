@@ -1,0 +1,10 @@
+{
+  "name": "imp-lab-ui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Contract between Imp Lab and extension UI libraries: implementation types and the modules Lab shares with them.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

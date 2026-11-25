@@ -1,6 +1,6 @@
 mod bindings;
 mod extensions;
-mod lab_model;
+pub mod lab_model;
 mod menu;
 mod project;
 mod records;
@@ -104,6 +104,8 @@ pub fn run() {
             extensions::get_topics,
             extensions::get_settings_layout,
             extensions::get_node_ui,
+            extensions::get_ui_extensions,
+            extensions::read_ui_library,
             extensions::get_status_items,
             user_state::get_user_state_entry,
             user_state::set_user_state_entry,

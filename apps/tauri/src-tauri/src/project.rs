@@ -1,4 +1,4 @@
-//! Projects: a Tome v2 config (`dataStores` + `sync`) that lists the data sources Lab works
+//! Projecs: a Tome v2 config (`dataStores` + `sync`) that lists the data sources Lab works
 //! with. Opening a project opens a [`TomeSession`] over every configured store; there is no
 //! "open file" any more.
 //!
@@ -150,6 +150,7 @@ pub fn project_info(project: &ProjectSession) -> Result<ProjectInfo, String> {
         .list_nodes(&NodeFilter::default())
         .map_err(db_error)?;
     let primary_id = session.store().primary().corpus_id.clone();
+    let types = crate::extensions::node_types();
     let stores: Vec<StoreInfo> = session
         .store()
         .corpus_stores()
@@ -170,7 +171,7 @@ pub fn project_info(project: &ProjectSession) -> Result<ProjectInfo, String> {
                     .iter()
                     .filter(|r| {
                         r.corpus_id.as_deref() == Some(store.corpus_id.as_str())
-                            && lab_model::kind_for_tables(&r.type_table_ids).is_some()
+                            && lab_model::node_type_of(&types, &r.type_table_ids).is_some()
                     })
                     .count(),
             }
@@ -617,7 +618,7 @@ mod tests {
     }
 
     #[test]
-    fn existing_tome_corpus_gets_lab_tables() {
+    fn existing_tome_corpus_gets_the_imp_graph_table() {
         let tmp = tempfile::tempdir().unwrap();
         let content = tmp.path().join("content");
         let store =
@@ -644,6 +645,5 @@ mod tests {
         let project = open_project(&config_path, &tmp.path().join("cache")).unwrap();
         let tables = project.session.list_type_tables().unwrap();
         assert!(tables.iter().any(|t| t.id == lab_model::IMP_GRAPH_TABLE_ID));
-        assert!(tables.iter().any(|t| t.id == lab_model::NOTATION_TABLE_ID));
     }
 }

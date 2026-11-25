@@ -5,6 +5,7 @@
   "type": "module",
   "workspaces": [
     ".",
+    "../../packages/imp-lab-ui",
     "../../../imp-graph-view",
     "../../../imp-ts/packages/*"
   ],
@@ -13,7 +14,7 @@
     "dev": "vite",
     "build": "node ./scripts/link-graph-view-peers.mjs && tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "bun test src/layoutGraph.test.ts src/documentHistory.test.ts src/piano-roll/edits.test.ts src/piano-roll/notationHistory.test.ts src/piano-roll/audition.test.ts src/piano-roll/recording.test.ts src/settings/settingsStore.test.ts src/extensionTopics.test.ts src/bindings.test.ts src/nodeUi.test.ts",
+    "test": "bun test src/layoutGraph.test.ts src/documentHistory.test.ts src/valueHistory.test.ts src/extensionUi.test.ts src/settings/settingsStore.test.ts src/extensionTopics.test.ts src/bindings.test.ts src/nodeUi.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "elkjs": "^0.12.1",
     "imp-core-types": "workspace:*",
     "imp-graph-view": "workspace:*",
+    "imp-lab-ui": "workspace:*",
     "imp-registry": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

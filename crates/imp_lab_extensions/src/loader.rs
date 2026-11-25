@@ -228,7 +228,7 @@ pub struct ExtensionConfigDto {
     pub id: String,
     pub enabled: bool,
     pub library_path: Option<String>,
-    pub client_module: Option<String>,
+    pub ui_library_path: Option<String>,
     pub params: Value,
 }
 
@@ -474,7 +474,7 @@ fn config_to_dto(config: &ExtensionsConfig) -> ExtensionsConfigDto {
                 id: e.id.clone(),
                 enabled: e.enabled,
                 library_path: e.library_path.clone(),
-                client_module: e.client_module.clone(),
+                ui_library_path: e.ui_library_path.clone(),
                 params: Value::Object(e.params.clone().into_iter().collect()),
             })
             .collect(),
@@ -533,7 +533,7 @@ mod tests {
             &path,
             r#"{
               "version": 1,
-              "extensions": [{"id":"x","enabled":true,"clientModule":"x/client"}],
+              "extensions": [{"id":"x","enabled":true,"uiLibraryPath":"x/ui.js"}],
               "components": [
                 {
                   "id":"play.start",
@@ -560,8 +560,8 @@ mod tests {
         assert!(runtime.result.warnings.is_empty());
         let config = runtime.result.config.expect("config");
         assert_eq!(
-            config.extensions[0].client_module.as_deref(),
-            Some("x/client")
+            config.extensions[0].ui_library_path.as_deref(),
+            Some("x/ui.js")
         );
         assert_eq!(
             runtime.result.contributions.command_ids,
@@ -572,37 +572,6 @@ mod tests {
             runtime.result.contributions.menu_items[0].menu,
             "Play"
         );
-    }
-
-    #[test]
-    fn loads_aura_lab_pack_when_cdylib_present() {
-        // Optional smoke: requires aura-engine lab-pack with a built cdylib beside this workspace.
-        let pack = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../aura-engine/lab-pack/extensions.json");
-        if !pack.is_file() {
-            return;
-        }
-        let runtime = load_extensions_from_path(&pack);
-        if runtime.result.catalogs.node_libraries.is_empty() {
-            // Pack present but cdylib not built into extensions/ — acceptable in CI without the artifact.
-            assert!(
-                runtime
-                    .result
-                    .warnings
-                    .iter()
-                    .any(|w| w.contains("dynamic library") || w.contains("load")),
-                "expected load warning when cdylib missing, got {:?}",
-                runtime.result.warnings
-            );
-            return;
-        }
-        assert!(
-            runtime.result.warnings.is_empty(),
-            "{:?}",
-            runtime.result.warnings
-        );
-        assert!(runtime.result.catalogs.node_libraries.len() >= 4);
-        assert_eq!(runtime.result.catalogs.type_constraint_libraries.len(), 1);
     }
 }
 

@@ -18,7 +18,7 @@
       "when": { "type": "key", "key": "w", "modifiers": ["ctrl"] }
     },
     {
-      "command": "document.new.notation",
+      "command": "document.new.graph",
       "when": { "type": "key", "key": "n", "modifiers": ["ctrl"] }
     },
     {
@@ -32,30 +32,6 @@
     {
       "command": "edit.redo",
       "when": { "type": "key", "key": "z", "modifiers": ["ctrl", "shift"] }
-    },
-    {
-      "command": "notation.tool.draw",
-      "when": { "type": "key", "key": "d" }
-    },
-    {
-      "command": "notation.tool.select",
-      "when": { "type": "key", "key": "s" }
-    },
-    {
-      "command": "notation.tool.erase",
-      "when": { "type": "key", "key": "e" }
-    },
-    {
-      "command": "notation.snap.toggle",
-      "when": { "type": "key", "key": "n" }
-    },
-    {
-      "command": "play.toggle",
-      "when": { "type": "key", "key": "space" }
-    },
-    {
-      "command": "notation.record.toggle",
-      "when": { "type": "key", "key": "r" }
     },
     {
       "command": "settings.open",

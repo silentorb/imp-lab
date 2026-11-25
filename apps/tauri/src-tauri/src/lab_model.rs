@@ -1,10 +1,11 @@
-//! Lab model: the well-known Tome type tables that make a node an Imp graph or a notation.
+//! Lab model: Tome node types Lab can open, and the well-known ids of a Lab project.
 //!
-//! A lab document is one Tome node: its title, plus a node-stored structured column holding the
-//! document body (`graph: imp_graph` for Imp graphs, `notation: json` for notations), plus
-//! set membership in the matching type table. The ids are fixed so every project (and TS Tome)
-//! recognises lab records the same way.
+//! A record is one Tome node: its title, plus a node-stored column holding its value, plus set
+//! membership in its node type's type table. Imp graphs (`graph: imp_graph`) are built in;
+//! extensions add node types through `node-type-editor` components. The Imp graph ids are fixed
+//! so every project (and TS Tome) recognises graph records the same way.
 
+use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tome_db::{DbError, TomeSession};
 use tome_flatfile::{
@@ -14,55 +15,79 @@ use tome_graph_interfaces::{js_json_file, Node, Properties};
 
 /// Type table whose members are Imp graphs (column `graph`, `imp_graph`).
 pub const IMP_GRAPH_TABLE_ID: &str = "01M80M9GRAPH00000000000001";
-/// Type table whose members are notations (column `notation`, `json`).
-///
-/// Tome types are nodes, so this hub's id is also the Imp `NodeTypeId` of a notation record (Aura's
-/// `aura_imp::NOTATION_NODE_TYPE` defines its ports). Keep the two ids equal.
-pub const NOTATION_TABLE_ID: &str = "01M80M9N0TAT00000000000001";
 /// Set-trait relationship type written into new projects.
 pub const SET_TYPE_ID: &str = "01M80M9SET0000000000000001";
 /// Home and archive hubs of a new project's primary store.
 pub const HOME_NODE_ID: &str = "01M80M9H0ME000000000000001";
 pub const ARCHIVE_NODE_ID: &str = "01M80M9ARCH000000000000001";
 
-pub const KIND_IMP_GRAPH: &str = "imp-graph";
-pub const KIND_NOTATION: &str = "notation";
+/// `type` tag of standalone Imp graph JSON documents.
+pub const IMP_GRAPH_DOCUMENT_TYPE: &str = "imp-graph";
 
-/// Document kind → (type table, structured column key).
-pub fn table_for_kind(kind: &str) -> Option<(&'static str, &'static str)> {
-    match kind {
-        KIND_IMP_GRAPH => Some((IMP_GRAPH_TABLE_ID, "graph")),
-        KIND_NOTATION => Some((NOTATION_TABLE_ID, "notation")),
-        _ => None,
+/// A Tome node type Lab can open: its type table, and the node-stored column with the value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeType {
+    /// Type-table id (also the hub node's id).
+    pub id: String,
+    /// Singular label for one record ("Imp graph").
+    pub label: String,
+    /// Hub node title ("Imp Graphs").
+    pub title: String,
+    /// Node-stored column holding the record's value.
+    pub column: String,
+    /// Tome column type of `column`.
+    pub column_type: String,
+    /// `type` tag of standalone JSON documents of this node type (seeding).
+    pub document_type: Option<String>,
+}
+
+impl NodeType {
+    /// The built-in Imp graph node type.
+    pub fn imp_graph() -> Self {
+        Self {
+            id: IMP_GRAPH_TABLE_ID.into(),
+            label: "Imp graph".into(),
+            title: "Imp Graphs".into(),
+            column: "graph".into(),
+            column_type: "imp_graph".into(),
+            document_type: Some(IMP_GRAPH_DOCUMENT_TYPE.into()),
+        }
+    }
+
+    pub fn is_imp_graph(&self) -> bool {
+        self.id == IMP_GRAPH_TABLE_ID
+    }
+
+    /// The node type an extension's `node-type-editor` opens.
+    pub fn from_editor(editor: &imp_lab_extensions::NodeTypeEditorDecl) -> Self {
+        Self {
+            id: editor.node_type_id.clone(),
+            label: editor.label.clone(),
+            title: editor.type_title.clone(),
+            column: editor.column.clone(),
+            column_type: editor.column_type.clone(),
+            document_type: editor.document_type.clone(),
+        }
+    }
+
+    fn table_schema(&self) -> Value {
+        json!({ "columns": [
+            { "key": self.column, "name": self.label, "type": self.column_type, "storage": "node" }
+        ] })
     }
 }
 
-/// Kind of a record from its type-table memberships.
-pub fn kind_for_tables(type_table_ids: &[String]) -> Option<&'static str> {
-    if type_table_ids.iter().any(|t| t == IMP_GRAPH_TABLE_ID) {
-        Some(KIND_IMP_GRAPH)
-    } else if type_table_ids.iter().any(|t| t == NOTATION_TABLE_ID) {
-        Some(KIND_NOTATION)
-    } else {
-        None
-    }
+/// Imp graphs, then the node types of `editors` (extension `node-type-editor` components).
+pub fn node_types_with(editors: &[imp_lab_extensions::NodeTypeEditorDecl]) -> Vec<NodeType> {
+    std::iter::once(NodeType::imp_graph())
+        .chain(editors.iter().map(NodeType::from_editor))
+        .collect()
 }
 
-fn table_schema_entries() -> Vec<(&'static str, Value)> {
-    vec![
-        (
-            IMP_GRAPH_TABLE_ID,
-            json!({ "columns": [
-                { "key": "graph", "name": "Graph", "type": "imp_graph", "storage": "node" }
-            ] }),
-        ),
-        (
-            NOTATION_TABLE_ID,
-            json!({ "columns": [
-                { "key": "notation", "name": "Notation", "type": "json", "storage": "node" }
-            ] }),
-        ),
-    ]
+/// The first of `type_table_ids` that is one of `types`.
+pub fn node_type_of<'a>(types: &'a [NodeType], type_table_ids: &[String]) -> Option<&'a NodeType> {
+    types.iter().find(|t| type_table_ids.contains(&t.id))
 }
 
 fn titled_node(id: &str, title: &str) -> Node {
@@ -89,16 +114,15 @@ pub fn new_project_model_files(name: &str) -> Vec<(&'static str, String)> {
         "version": 1,
         "homeNodeId": HOME_NODE_ID,
         "archiveNodeId": ARCHIVE_NODE_ID,
-        "protectedNodeIds": [HOME_NODE_ID, ARCHIVE_NODE_ID, IMP_GRAPH_TABLE_ID, NOTATION_TABLE_ID],
+        "protectedNodeIds": [HOME_NODE_ID, ARCHIVE_NODE_ID, IMP_GRAPH_TABLE_ID],
         "graphExplorer": { "defaultAnchorNodeId": HOME_NODE_ID },
         "staticSite": { "homeNodeId": HOME_NODE_ID },
         "quickLinks": [],
         "branding": { "appTitle": name }
     });
+    let graph = NodeType::imp_graph();
     let mut tables = Map::new();
-    for (id, schema) in table_schema_entries() {
-        tables.insert(id.into(), schema);
-    }
+    tables.insert(graph.id.clone(), graph.table_schema());
     let table_schemas = json!({ "version": 1, "tables": tables });
     vec![
         (ASSOCIATIONS_FILENAME, js_json_file(&associations)),
@@ -109,32 +133,34 @@ pub fn new_project_model_files(name: &str) -> Vec<(&'static str, String)> {
 
 /// Hub nodes for a brand-new project.
 pub fn new_project_nodes() -> Vec<Node> {
+    let graph = NodeType::imp_graph();
     vec![
         titled_node(HOME_NODE_ID, "Home"),
         titled_node(ARCHIVE_NODE_ID, "Archive"),
-        titled_node(IMP_GRAPH_TABLE_ID, "Imp Graphs"),
-        titled_node(NOTATION_TABLE_ID, "Notations"),
+        titled_node(&graph.id, &graph.title),
     ]
 }
 
-/// Make sure the primary store carries the lab type tables (existing Tome corpora opened as
-/// projects). Only touches a writable primary; a read-only one is left as is and lab records
-/// can then only be read from it.
-pub fn ensure_lab_model(session: &TomeSession) -> Result<(), DbError> {
+/// Make sure the primary store carries the set type and the type tables of `types` (existing
+/// Tome corpora opened as projects, or a node type an extension adds on first use). Only
+/// touches a writable primary; a read-only one is left as is and records of a missing type can
+/// then only be read.
+pub fn ensure_node_types(session: &TomeSession, types: &[&NodeType]) -> Result<(), DbError> {
     let primary = session.store().primary().clone();
     if primary.is_readonly() {
         return Ok(());
     }
     let mut model_files: Vec<(&str, String)> = Vec::new();
     let tables = primary.read_table_schemas_file()?;
-    let missing: Vec<(&str, Value)> = table_schema_entries()
-        .into_iter()
-        .filter(|(id, _)| !tables.tables.contains_key(*id))
+    let missing: Vec<&NodeType> = types
+        .iter()
+        .copied()
+        .filter(|t| !tables.tables.contains_key(&t.id))
         .collect();
     if !missing.is_empty() {
         let mut merged = tables.tables.clone();
-        for (id, schema) in missing {
-            merged.insert(id.to_string(), schema);
+        for node_type in missing {
+            merged.insert(node_type.id.clone(), node_type.table_schema());
         }
         let file = json!({ "version": tables.version.max(1), "tables": merged });
         model_files.push((TABLE_SCHEMAS_FILENAME, js_json_file(&file)));
@@ -157,18 +183,20 @@ pub fn ensure_lab_model(session: &TomeSession) -> Result<(), DbError> {
         }
         model_files.push((ASSOCIATIONS_FILENAME, js_json_file(&file)));
     }
-    let nodes: Vec<Node> = [
-        (IMP_GRAPH_TABLE_ID, "Imp Graphs"),
-        (NOTATION_TABLE_ID, "Notations"),
-    ]
-    .into_iter()
-    .filter(|(id, _)| session.store().locate_node(id).is_none())
-    .map(|(id, title)| titled_node(id, title))
-    .collect();
+    let nodes: Vec<Node> = types
+        .iter()
+        .filter(|t| session.store().locate_node(&t.id).is_none())
+        .map(|t| titled_node(&t.id, &t.title))
+        .collect();
     if model_files.is_empty() && nodes.is_empty() {
         return Ok(());
     }
     session.bootstrap_corpus(&primary.corpus_id, &model_files, &nodes, &[])
+}
+
+/// [`ensure_node_types`] for Lab's own model (Imp graphs), at project open.
+pub fn ensure_lab_model(session: &TomeSession) -> Result<(), DbError> {
+    ensure_node_types(session, &[&NodeType::imp_graph()])
 }
 
 #[cfg(test)]
@@ -177,13 +205,7 @@ mod tests {
 
     #[test]
     fn well_known_ids_are_ulids() {
-        for id in [
-            IMP_GRAPH_TABLE_ID,
-            NOTATION_TABLE_ID,
-            SET_TYPE_ID,
-            HOME_NODE_ID,
-            ARCHIVE_NODE_ID,
-        ] {
+        for id in [IMP_GRAPH_TABLE_ID, SET_TYPE_ID, HOME_NODE_ID, ARCHIVE_NODE_ID] {
             assert!(tome_flatfile::is_node_id(id), "{id}");
         }
     }
