@@ -1616,14 +1616,14 @@ dependencies = [
 
 [[package]]
 name = "imp_core_types"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "imp_file"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "imp_core_types",
  "serde",
