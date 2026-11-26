@@ -92,7 +92,7 @@ Rules:
 
 ### `imp-catalog`
 
-Registers Imp `NodeLibrary`, `TypeConstraintLibrary`, and/or `GraphLibrary` catalogs into the host registry (add-node picker, ports, literals). Implementations live in the extension cdylib and call the Lab register entrypoint.
+Registers Imp `NodeLibrary` values (node definitions plus their `types`, e.g. a named union such as `Audio`) and [Imp files](https://github.com/silentorb/imp-spec/blob/main/docs/packages/imp-file/imp-files.md) (type and node definitions) into the host registry (add-node picker, ports, literals). Implementations live in the extension cdylib and call the Lab register entrypoint, using the host table `ImpLabHostV1` (`add_node_library_json`, `add_imp_file_json`).
 
 ### `command`
 
@@ -103,7 +103,7 @@ Declares a host command id (`implementationId`, e.g. `play.start`) dispatched to
 | `serviceId` | Id of the enabled `service` component that handles the command |
 | `action` | Service action: `start`, `stop`, `toggle`, or `is_playing` |
 
-The Tauri shell keeps built-in File/Edit/View commands local. A command goes first to the active document's extension editor (if it handles it), then to the service via `run_extension_command`, with the active document's value as JSON (the Imp graph, or an extension node type's stored value) and an optional neighbor path. Documents are Tome records (see [projects and records](projects-and-records.md)), so the neighbor path is the open project's config file (`imp-project.json`). An extension that follows references between records (a graph using another record by node id) reads them from the project's data stores. With no project open it is null.
+The Tauri shell keeps built-in File/Edit/View commands local. A command goes first to the active document's extension editor (if it handles it), then to the service via `run_extension_command`, with the active document's value as JSON (the Imp graph as an Imp file, or an extension node type's stored value) and an optional neighbor path. Documents are Tome records (see [projects and records](projects-and-records.md)), so the neighbor path is the open project's config file (`imp-project.json`). An extension that follows references between records (a graph using another record by node id) reads them from the project's data stores. With no project open it is null.
 
 ### `menu-item`
 
@@ -128,7 +128,7 @@ A service may also publish `request`: UTF-8 JSON in, a UTF-8 JSON **reply** out,
 
 ### Topics
 
-The extension → host channel. `ImpLabHostV0` carries `publish(topic, json)` with its own `publisher_ctx`, which, unlike `ctx`, lives for the whole process. An extension keeps both (`ImpLabHostV0::publisher()` gives a `Publisher`) and publishes the **latest value** of a named topic whenever it changes, from any thread.
+The extension → host channel. `ImpLabHostV1` carries `publish(topic, json)` with its own `publisher_ctx`, which, unlike `ctx`, lives for the whole process. An extension keeps both (`ImpLabHostV1::publisher()` gives a `Publisher`) and publishes the **latest value** of a named topic whenever it changes, from any thread.
 
 - A topic id is a string; by convention it starts with the publishing extension's id (`acme.midi.status`). Its value is opaque JSON.
 - Publishing replaces the value. There is no history or queue, and the extension chooses how often to publish (throttling fast-changing values).

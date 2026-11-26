@@ -1,16 +1,11 @@
-import { coreNodeLibrary, type GraphLibrary, type NodeLibrary, type TypeConstraintLibrary } from "imp-core-types";
-import {
-  createRegistry,
-  loadGraphLibrary,
-  loadNodeLibrary,
-  loadTypeConstraintLibrary,
-  type Registry,
-} from "imp-registry";
+import { coreNodeLibrary, type ImpFile, type NodeLibrary } from "imp-core-types";
+import { parseImpFile } from "imp-file";
+import { createRegistry, loadImpFile, loadNodeLibrary, type Registry } from "imp-registry";
 
 export type ExtensionCatalogs = {
   nodeLibraries?: unknown[];
-  typeConstraintLibraries?: unknown[];
-  graphLibraries?: unknown[];
+  /** Imp files (types and node definitions) registered by extensions. */
+  impFiles?: unknown[];
 };
 
 /** Imp Lab host registry — Imp core, plus catalogs from optional extensions. */
@@ -22,14 +17,8 @@ export function getLabRegistry(catalogs?: ExtensionCatalogs | null): Registry {
   for (const library of catalogs.nodeLibraries ?? []) {
     registry = loadNodeLibrary(registry, library as NodeLibrary);
   }
-  for (const library of catalogs.typeConstraintLibraries ?? []) {
-    registry = loadTypeConstraintLibrary(
-      registry,
-      library as TypeConstraintLibrary,
-    );
-  }
-  for (const library of catalogs.graphLibraries ?? []) {
-    registry = loadGraphLibrary(registry, library as GraphLibrary);
+  for (const file of catalogs.impFiles ?? []) {
+    registry = loadImpFile(registry, parseImpFile(file) as ImpFile);
   }
   return registry;
 }

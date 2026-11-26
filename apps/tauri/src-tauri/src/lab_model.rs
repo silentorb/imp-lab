@@ -21,9 +21,6 @@ pub const SET_TYPE_ID: &str = "01M80M9SET0000000000000001";
 pub const HOME_NODE_ID: &str = "01M80M9H0ME000000000000001";
 pub const ARCHIVE_NODE_ID: &str = "01M80M9ARCH000000000000001";
 
-/// `type` tag of standalone Imp graph JSON documents.
-pub const IMP_GRAPH_DOCUMENT_TYPE: &str = "imp-graph";
-
 /// A Tome node type Lab can open: its type table, and the node-stored column with the value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,7 +35,8 @@ pub struct NodeType {
     pub column: String,
     /// Tome column type of `column`.
     pub column_type: String,
-    /// `type` tag of standalone JSON documents of this node type (seeding).
+    /// `type` tag of standalone JSON documents of this node type (seeding). Imp graphs have none:
+    /// Imp files are recognized by `format: "imp"`.
     pub document_type: Option<String>,
 }
 
@@ -51,7 +49,7 @@ impl NodeType {
             title: "Imp Graphs".into(),
             column: "graph".into(),
             column_type: "imp_graph".into(),
-            document_type: Some(IMP_GRAPH_DOCUMENT_TYPE.into()),
+            document_type: None,
         }
     }
 

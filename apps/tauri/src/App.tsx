@@ -18,6 +18,7 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import type { Graph, Port, PrimitiveValue } from "imp-core-types";
+import { impFileFromGraph, impFileGraph, parseImpFile, serializeImpFile } from "imp-file";
 import {
   formatLiteralValue,
   isLiteralEditableType,
@@ -180,8 +181,7 @@ type ExtensionsLoadDto = {
   packRoot?: string | null;
   catalogs?: {
     nodeLibraries?: unknown[];
-    typeConstraintLibraries?: unknown[];
-    graphLibraries?: unknown[];
+    impFiles?: unknown[];
   };
   contributions?: {
     commandIds?: string[];
@@ -237,7 +237,7 @@ function nodeTypeInfos(ui: LoadedUi): NodeTypeInfo[] {
 /** Body to persist for a document. */
 function payloadFor(ui: LoadedUi, doc: EditorDocument): RecordPayload {
   if (isImpGraph(doc)) {
-    return { nodeType: IMP_GRAPH_NODE_TYPE, value: doc.graph ?? emptyImpGraph() };
+    return { nodeType: IMP_GRAPH_NODE_TYPE, value: impFileFromGraph(doc.graph ?? emptyImpGraph()) };
   }
   const serialize = editorFor(ui, doc.nodeType)?.implementation.serialize;
   return { nodeType: doc.nodeType, value: serialize ? serialize(doc.value) : doc.value };
@@ -246,7 +246,7 @@ function payloadFor(ui: LoadedUi, doc: EditorDocument): RecordPayload {
 /** Body of a new, empty record of `nodeType`. */
 function emptyPayload(ui: LoadedUi, nodeType: string): RecordPayload {
   if (nodeType === IMP_GRAPH_NODE_TYPE) {
-    return { nodeType, value: emptyImpGraph() };
+    return { nodeType, value: impFileFromGraph(emptyImpGraph()) };
   }
   const editor = editorFor(ui, nodeType);
   if (!editor) {
@@ -318,7 +318,7 @@ function materializeOpenedDocument(
     dirty: false,
   };
   if (dto.nodeType === IMP_GRAPH_NODE_TYPE) {
-    const graph = (dto.value as Graph | null) ?? emptyImpGraph();
+    const graph = dto.value ? impFileGraph(parseImpFile(dto.value)) : emptyImpGraph();
     return { doc: { ...base, graph }, graphHistory: createHistory(graph) };
   }
   const editor = editorFor(ui, dto.nodeType);
@@ -1447,7 +1447,9 @@ export default function App() {
 
       // The active document's value: the graph, or an extension node type's stored value.
       const graphJson = doc
-        ? JSON.stringify(isImpGraph(doc) ? doc.graph : payloadFor(uiRef.current, doc).value)
+        ? isImpGraph(doc)
+          ? serializeImpFile(impFileFromGraph(doc.graph ?? emptyImpGraph(), { format: "imp" }))
+          : JSON.stringify(payloadFor(uiRef.current, doc).value)
         : null;
 
       if (!graphJson && (id === CMD_PLAY_START || id === CMD_PLAY_TOGGLE)) {

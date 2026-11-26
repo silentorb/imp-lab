@@ -6,8 +6,8 @@
 //! ```
 //!
 //! `<project-dir>` must not already contain a project. Each document becomes a record in the
-//! project's primary store (`content/`); documents with a node id keep it. Imp graphs
-//! (`"type": "imp-graph"`) are always known. `--extensions` adds the node types of that
+//! project's primary store (`content/`); documents with a node id keep it. Imp files
+//! (`"format": "imp"`, nodes and edges) are always known as Imp graphs. `--extensions` adds the node types of that
 //! config's `node-type-editor` components, matched by their `documentType`.
 
 use std::path::PathBuf;

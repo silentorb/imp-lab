@@ -24,8 +24,7 @@ use thiserror::Error;
 #[serde(rename_all = "camelCase")]
 pub struct LoadedCatalogs {
     pub node_libraries: Vec<Value>,
-    pub type_constraint_libraries: Vec<Value>,
-    pub graph_libraries: Vec<Value>,
+    pub imp_files: Vec<Value>,
 }
 
 /// Serializable contribution snapshot for the webview (no service vtables).
@@ -344,10 +343,7 @@ pub fn load_extensions_from_path(config_path: &Path) -> ExtensionsRuntime {
             Ok((lib, host)) => {
                 if extension_has_enabled_imp_catalog(&config, &ext.id) {
                     catalogs.node_libraries.extend(host.node_libraries);
-                    catalogs
-                        .type_constraint_libraries
-                        .extend(host.type_constraint_libraries);
-                    catalogs.graph_libraries.extend(host.graph_libraries);
+                    catalogs.imp_files.extend(host.imp_files);
                 }
                 // Retain services from every successful library load.
                 for (id, vtable) in host.services.into_map() {

@@ -1622,6 +1622,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "imp_file"
+version = "0.6.0"
+dependencies = [
+ "imp_core_types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "imp_lab"
 version = "0.1.0"
 dependencies = [
@@ -3968,6 +3978,7 @@ name = "tome_db"
 version = "0.1.0"
 dependencies = [
  "imp_core_types",
+ "imp_file",
  "imp_mir",
  "notify",
  "serde",

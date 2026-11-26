@@ -25,6 +25,7 @@
     "@xyflow/react": "^12.8.2",
     "elkjs": "^0.12.1",
     "imp-core-types": "workspace:*",
+    "imp-file": "workspace:*",
     "imp-graph-view": "workspace:*",
     "imp-lab-ui": "workspace:*",
     "imp-registry": "workspace:*",

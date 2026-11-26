@@ -9,8 +9,7 @@ use std::os::raw::c_uchar;
 /// Opaque host context passed to extensions.
 pub struct ExtensionHost {
     pub(crate) node_libraries: Vec<Value>,
-    pub(crate) type_constraint_libraries: Vec<Value>,
-    pub(crate) graph_libraries: Vec<Value>,
+    pub(crate) imp_files: Vec<Value>,
     pub(crate) services: ServiceRegistry,
     pub(crate) pack_root: std::path::PathBuf,
 }
@@ -20,8 +19,7 @@ impl ExtensionHost {
     pub fn new(pack_root: impl Into<std::path::PathBuf>) -> Self {
         Self {
             node_libraries: Vec::new(),
-            type_constraint_libraries: Vec::new(),
-            graph_libraries: Vec::new(),
+            imp_files: Vec::new(),
             services: ServiceRegistry::default(),
             pack_root: pack_root.into(),
         }
@@ -32,14 +30,9 @@ impl ExtensionHost {
         &self.node_libraries
     }
 
-    /// Imp `TypeConstraintLibrary` JSON objects.
-    pub fn type_constraint_libraries(&self) -> &[Value] {
-        &self.type_constraint_libraries
-    }
-
-    /// Imp `GraphLibrary` JSON objects.
-    pub fn graph_libraries(&self) -> &[Value] {
-        &self.graph_libraries
+    /// Imp file JSON objects (types, node definitions; see imp-spec `imp-files.md`).
+    pub fn imp_files(&self) -> &[Value] {
+        &self.imp_files
     }
 
     /// Services registered during this library's `imp_lab_extension_register`.
@@ -55,19 +48,15 @@ impl ExtensionHost {
 
 /// C ABI table passed to `imp_lab_extension_register`.
 #[repr(C)]
-pub struct ImpLabHostV0 {
+pub struct ImpLabHostV1 {
     /// Host context pointer (`*mut ExtensionHost`).
     pub ctx: *mut c_void,
     /// Register a NodeLibrary JSON document (UTF-8).
     pub add_node_library_json: Option<
         unsafe extern "C" fn(ctx: *mut c_void, json: *const c_uchar, len: usize) -> c_int,
     >,
-    /// Register a TypeConstraintLibrary JSON document (UTF-8).
-    pub add_type_constraint_library_json: Option<
-        unsafe extern "C" fn(ctx: *mut c_void, json: *const c_uchar, len: usize) -> c_int,
-    >,
-    /// Register a GraphLibrary JSON document (UTF-8).
-    pub add_graph_library_json: Option<
+    /// Register an Imp file JSON document (UTF-8): its `types` and `definitions`.
+    pub add_imp_file_json: Option<
         unsafe extern "C" fn(ctx: *mut c_void, json: *const c_uchar, len: usize) -> c_int,
     >,
     /// Resolve a pack-relative path into `out` (UTF-8, NUL-terminated). Returns 0 on success.
@@ -95,7 +84,7 @@ pub struct ImpLabHostV0 {
     pub publish: Option<PublishFn>,
 }
 
-impl ImpLabHostV0 {
+impl ImpLabHostV1 {
     /// The topic publisher this host offers, for an extension to keep.
     pub fn publisher(&self) -> Option<Publisher> {
         Publisher::new(self.publish, self.publisher_ctx)
@@ -106,7 +95,7 @@ impl ImpLabHostV0 {
 pub const EXTENSION_REGISTER_SYMBOL: &[u8] = b"imp_lab_extension_register\0";
 
 /// Extension entrypoint signature.
-pub type ExtensionRegisterFn = unsafe extern "C" fn(host: *const ImpLabHostV0) -> c_int;
+pub type ExtensionRegisterFn = unsafe extern "C" fn(host: *const ImpLabHostV1) -> c_int;
 
 unsafe extern "C" fn add_node_library_json(
     ctx: *mut c_void,
@@ -116,22 +105,12 @@ unsafe extern "C" fn add_node_library_json(
     push_json(ctx, json, len, |host, value| host.node_libraries.push(value))
 }
 
-unsafe extern "C" fn add_type_constraint_library_json(
+unsafe extern "C" fn add_imp_file_json(
     ctx: *mut c_void,
     json: *const c_uchar,
     len: usize,
 ) -> c_int {
-    push_json(ctx, json, len, |host, value| {
-        host.type_constraint_libraries.push(value)
-    })
-}
-
-unsafe extern "C" fn add_graph_library_json(
-    ctx: *mut c_void,
-    json: *const c_uchar,
-    len: usize,
-) -> c_int {
-    push_json(ctx, json, len, |host, value| host.graph_libraries.push(value))
+    push_json(ctx, json, len, |host, value| host.imp_files.push(value))
 }
 
 unsafe extern "C" fn resolve_pack_path(
@@ -202,12 +181,11 @@ unsafe fn push_json(
 }
 
 /// Build the C host table for `host`.
-pub fn host_vtable(host: &mut ExtensionHost) -> ImpLabHostV0 {
-    ImpLabHostV0 {
+pub fn host_vtable(host: &mut ExtensionHost) -> ImpLabHostV1 {
+    ImpLabHostV1 {
         ctx: host as *mut ExtensionHost as *mut c_void,
         add_node_library_json: Some(add_node_library_json),
-        add_type_constraint_library_json: Some(add_type_constraint_library_json),
-        add_graph_library_json: Some(add_graph_library_json),
+        add_imp_file_json: Some(add_imp_file_json),
         resolve_pack_path: Some(resolve_pack_path),
         register_service: Some(register_service),
         publisher_ctx: topic_hub() as *const TopicHub as *mut c_void,
@@ -220,7 +198,7 @@ pub fn host_vtable(host: &mut ExtensionHost) -> ImpLabHostV0 {
 /// # Safety
 ///
 /// `callback` (when `Some`) and `ctx` must be valid for the duration of the call and
-/// match the Lab host that provided them via [`ImpLabHostV0`].
+/// match the Lab host that provided them via [`ImpLabHostV1`].
 pub unsafe fn host_add_json(
     callback: Option<unsafe extern "C" fn(*mut c_void, *const c_uchar, usize) -> c_int>,
     ctx: *mut c_void,

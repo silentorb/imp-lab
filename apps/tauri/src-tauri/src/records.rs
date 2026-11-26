@@ -82,20 +82,11 @@ pub struct SaveResult {
     pub title: String,
 }
 
-/// Bare `{ nodes, edges }` (an `imp-graph` envelope `type` is dropped).
+/// A record's Imp graph value: a topology-only Imp file (`nodes` / `edges`). `format` and `id`
+/// are dropped; the record owns identity. `types` / `definitions` are rejected in records.
 fn validate_graph(graph: &Value) -> Result<Value, String> {
-    let nodes = graph
-        .get("nodes")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "invalid_graph: graph is missing a \"nodes\" object".to_string())?;
-    let edges = graph
-        .get("edges")
-        .and_then(Value::as_object)
-        .ok_or_else(|| "invalid_graph: graph is missing an \"edges\" object".to_string())?;
-    let mut out = serde_json::Map::new();
-    out.insert("nodes".into(), Value::Object(nodes.clone()));
-    out.insert("edges".into(), Value::Object(edges.clone()));
-    Ok(Value::Object(out))
+    let graph = tome_db::graph_from_stored_imp(graph).map_err(|e| format!("invalid_graph: {e}"))?;
+    serde_json::to_value(tome_db::stored_imp_from_graph(&graph)).map_err(|e| format!("invalid_graph: {e}"))
 }
 
 /// Imp graphs are validated here; other node types' values belong to their editors.
@@ -203,7 +194,7 @@ pub fn open_record(
         .cloned();
     let value = match stored {
         Some(v) => validate_value(node_type, &v)?,
-        None if node_type.is_imp_graph() => serde_json::json!({ "nodes": {}, "edges": {} }),
+        None if node_type.is_imp_graph() => serde_json::json!({}),
         None => Value::Null,
     };
     Ok(RecordDocument {
@@ -397,7 +388,7 @@ pub(crate) mod tests {
     fn graph_payload() -> RecordPayload {
         RecordPayload {
             node_type: lab_model::IMP_GRAPH_TABLE_ID.into(),
-            value: json!({ "nodes": { "a": { "id": "a", "type": "imp.add", "inputs": {} } }, "edges": {} }),
+            value: json!({ "nodes": [{ "id": "a", "type": "imp.add", "inputs": {} }] }),
         }
     }
 
@@ -455,11 +446,11 @@ pub(crate) mod tests {
         assert!(err.starts_with("unsupported_node_type"), "{err}");
 
         let mut edited = graph_payload();
-        edited.value = json!({ "nodes": {}, "edges": {}, "type": "imp-graph" });
+        edited.value = json!({ "format": "imp", "nodes": [], "edges": [] });
         save_record(session, &types, &graph.record.node_id, &edited).unwrap();
         let doc = open_record(session, &types, &graph.record.node_id).unwrap();
         assert_eq!(doc.node_type, graph_id);
-        assert_eq!(doc.value, json!({ "nodes": {}, "edges": {} }));
+        assert_eq!(doc.value, json!({}));
         assert_eq!(doc.title, "Groove");
 
         let doc = open_record(session, &types, &sketch.record.node_id).unwrap();

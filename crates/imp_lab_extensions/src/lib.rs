@@ -15,7 +15,7 @@ pub use config::{
     ExtensionsError, SUPPORTED_VERSION,
 };
 pub use host::{
-    host_add_json, host_vtable, ExtensionHost, ExtensionRegisterFn, ImpLabHostV0,
+    host_add_json, host_vtable, ExtensionHost, ExtensionRegisterFn, ImpLabHostV1,
     EXTENSION_REGISTER_SYMBOL,
 };
 pub use loader::{

@@ -11,6 +11,7 @@
         "@xyflow/react": "^12.8.2",
         "elkjs": "^0.12.1",
         "imp-core-types": "workspace:*",
+        "imp-file": "workspace:*",
         "imp-graph-view": "workspace:*",
         "imp-lab-ui": "workspace:*",
         "imp-registry": "workspace:*",
@@ -28,7 +29,7 @@
     },
     "../../../imp-graph-view": {
       "name": "imp-graph-view",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
         "imp-core-types": "workspace:^0.5.0",
       },
@@ -48,7 +49,7 @@
     },
     "../../../imp-ts/packages/imp-collection-transforms": {
       "name": "imp-collection-transforms",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
         "imp-core-types": "workspace:^0.5.0",
       },
@@ -59,15 +60,15 @@
     },
     "../../../imp-ts/packages/imp-core-types": {
       "name": "imp-core-types",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "devDependencies": {
-        "imp-registry": "workspace:^0.5.0",
+        "imp-registry": "workspace:^0.6.0",
         "typescript": "5.8.2",
       },
     },
     "../../../imp-ts/packages/imp-execution": {
       "name": "imp-execution",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "dependencies": {
         "imp-collection-transforms": "workspace:^0.5.0",
         "imp-core-types": "workspace:^0.5.0",
@@ -79,11 +80,11 @@
         "typescript": "5.8.2",
       },
     },
-    "../../../imp-ts/packages/imp-graph-library": {
-      "name": "imp-graph-library",
-      "version": "0.2.0",
+    "../../../imp-ts/packages/imp-file": {
+      "name": "imp-file",
+      "version": "0.3.0",
       "dependencies": {
-        "imp-core-types": "workspace:^0.5.0",
+        "imp-core-types": "workspace:^0.6.0",
       },
       "devDependencies": {
         "typescript": "5.8.2",
@@ -91,7 +92,7 @@
     },
     "../../../imp-ts/packages/imp-graph-resolve": {
       "name": "imp-graph-resolve",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "imp-core-types": "workspace:^0.5.0",
         "imp-registry": "workspace:^0.5.0",
@@ -104,7 +105,7 @@
     },
     "../../../imp-ts/packages/imp-pathing": {
       "name": "imp-pathing",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "dependencies": {
         "imp-core-types": "workspace:^0.5.0",
       },
@@ -117,9 +118,9 @@
     },
     "../../../imp-ts/packages/imp-registry": {
       "name": "imp-registry",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "dependencies": {
-        "imp-core-types": "workspace:^0.5.0",
+        "imp-core-types": "workspace:^0.6.0",
       },
       "devDependencies": {
         "typescript": "5.8.2",
@@ -127,7 +128,7 @@
     },
     "../../../imp-ts/packages/imp-sql": {
       "name": "imp-sql",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "dependencies": {
         "imp-collection-transforms": "workspace:^0.5.0",
         "imp-core-types": "workspace:^0.5.0",
@@ -142,7 +143,7 @@
     },
     "../../../imp-ts/packages/imp-typecheck": {
       "name": "imp-typecheck",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "dependencies": {
         "imp-core-types": "workspace:^0.5.0",
         "imp-registry": "workspace:^0.5.0",
@@ -451,7 +452,7 @@
 
     "imp-execution": ["imp-execution@workspace:../../../imp-ts/packages/imp-execution"],
 
-    "imp-graph-library": ["imp-graph-library@workspace:../../../imp-ts/packages/imp-graph-library"],
+    "imp-file": ["imp-file@workspace:../../../imp-ts/packages/imp-file"],
 
     "imp-graph-resolve": ["imp-graph-resolve@workspace:../../../imp-ts/packages/imp-graph-resolve"],
 
@@ -553,7 +554,7 @@
 
     "imp-execution/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 
-    "imp-graph-library/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
+    "imp-file/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 
     "imp-graph-resolve/typescript": ["typescript@5.8.2", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-aJn6wq13/afZp/jT9QZmwEjDqqvSGp1VT5GVg+f/t6/oVyrgXM6BY1h9BRh/O5p3PlUPAe+WuiEZOmb/49RqoQ=="],
 

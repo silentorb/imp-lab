@@ -2,8 +2,8 @@
 //! adds).
 //!
 //! Tooling only (the `seed_project` example): products use it to ship sample projects. The app
-//! itself has no legacy-file import. A document's `type` tag picks its node type (Imp graphs:
-//! `imp-graph`; extension node types: their editor's `documentType`). Documents that carry a
+//! itself has no legacy-file import. Imp files (`"format": "imp"`) become Imp graph records; any
+//! other document's `type` tag picks its node type (an extension editor's `documentType`). Documents that carry a
 //! node id keep it, so records that reference each other by id still resolve.
 
 use std::path::{Path, PathBuf};
@@ -42,10 +42,17 @@ fn document_payload<'a>(
         .and_then(Value::as_str)
         .filter(|id| tome_flatfile::is_node_id(id))
         .map(str::to_string);
+    let is_imp_file = value.get("format").and_then(Value::as_str) == Some(imp_core_types::IMP_FILE_FORMAT);
     let tag = value.get("type").and_then(Value::as_str);
     let node_type = types
         .iter()
-        .find(|t| tag.is_some() && t.document_type.as_deref() == tag)
+        .find(|t| {
+            if is_imp_file {
+                t.is_imp_graph()
+            } else {
+                tag.is_some() && t.document_type.as_deref() == tag
+            }
+        })
         .ok_or_else(|| {
             format!(
                 "unsupported_document_type: {}: type {tag:?} is not a known node type",
@@ -112,7 +119,7 @@ mod tests {
         let graph = src.join("song.json");
         std::fs::write(
             &graph,
-            json!({ "type": "imp-graph", "nodes": {}, "edges": {} }).to_string(),
+            json!({ "format": "imp", "nodes": [] }).to_string(),
         )
         .unwrap();
         let sketch = src.join("doodle.json");
@@ -123,7 +130,7 @@ mod tests {
         )
         .unwrap();
         let bad = src.join("library.json");
-        std::fs::write(&bad, json!({ "type": "imp-graph-library" }).to_string()).unwrap();
+        std::fs::write(&bad, json!({ "type": "imp-graph-library" }).to_string()).unwrap(); // not an Imp file
 
         let types = types();
         let project_dir = tmp.path().join("project");

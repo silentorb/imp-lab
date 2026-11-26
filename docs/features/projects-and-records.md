@@ -35,7 +35,7 @@ A record is one Tome node, and what it is comes from its **Tome node type**: mem
 
 | Node type | Type table (id) | Value column | Editor |
 | --- | --- | --- | --- |
-| Imp graph | `01M80M9GRAPH00000000000001` "Imp Graphs" | `graph`, `imp_graph`, node storage: bare `{ nodes, edges }` | built in |
+| Imp graph | `01M80M9GRAPH00000000000001` "Imp Graphs" | `graph`, `imp_graph`, node storage: a topology-only Imp file (`nodes` / `edges` arrays) | built in |
 | any other | named by an extension's `node-type-editor` | named by that component (`json` by default) | the extension's UI library ([extensions](extensions.md#node-type-editor)) |
 
 - **On disk**, the title, timestamps and value sit in the node's YAML frontmatter. The node type comes from set membership in the type table.
@@ -72,7 +72,7 @@ cd apps/tauri/src-tauri
 cargo run --example seed_project -- [--extensions <extensions.json>] <project-dir> <name> <doc.json>...
 ```
 
-Each document becomes a record in the new project's primary store, titled after its file name. Its `type` tag picks the node type: `imp-graph` for Imp graphs, or the `documentType` of a `node-type-editor` in the `--extensions` config. A document's `id` is kept as the node id when it is a ULID, so records that reference each other by id still line up (`src-tauri/src/seed.rs`).
+Each document becomes a record in the new project's primary store, titled after its file name. Imp files (`"format": "imp"`) become Imp graph records; any other document's `type` tag picks the node type: the `documentType` of a `node-type-editor` in the `--extensions` config. A document's `id` is kept as the node id when it is a ULID, so records that reference each other by id still line up (`src-tauri/src/seed.rs`).
 
 ## Live changes
 
